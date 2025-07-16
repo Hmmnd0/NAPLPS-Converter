@@ -174,7 +174,7 @@ class TelidonDrawCmd {
 
         this.points = [];
         this.pointsIndex = 0;
-        this.maxCoord = 50; // Smaller scale for better visibility of complex shapes
+        this.maxCoord = 10000; // Increased from 50 to handle larger NAPLPS coordinate values
 
         console.log('[TelidonDrawCmd] Constructor called', { 
             opcode: _cmd.opcode.id,
@@ -205,10 +205,15 @@ class TelidonDrawCmd {
         if (this.cmd && this.cmd.points && this.cmd.points.length > 0) {
             // The NapCmd already has coordinates extracted and stored as [x, y] arrays
             console.log('[TelidonDrawCmd] Found points in command:', this.cmd.points.length);
-            this.points = this.cmd.points.map(p => ({
-                x: Math.max(0, Math.min(1, p[0] / this.maxCoord)),
-                y: Math.max(0, Math.min(1, p[1] / this.maxCoord))
-            }));
+            this.points = this.cmd.points.map(p => {
+                const normalizedX = Math.max(0, Math.min(1, p[0] / this.maxCoord));
+                const normalizedY = Math.max(0, Math.min(1, p[1] / this.maxCoord));
+                console.log(`[TelidonDrawCmd] Normalizing point: [${p[0]}, ${p[1]}] -> [${normalizedX}, ${normalizedY}]`);
+                return {
+                    x: normalizedX,
+                    y: normalizedY
+                };
+            });
             console.log('[TelidonDrawCmd] Converted', this.points.length, 'points from command');
         } else if (this.cmd && this.cmd.data && this.cmd.data.length > 0) {
             // Fallback: try to extract coordinates from raw data
