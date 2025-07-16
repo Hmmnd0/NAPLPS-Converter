@@ -1046,23 +1046,51 @@ class NapCmd {
         }
 
         if (!data || typeof data.length !== 'number') {
+            console.log('[setPoints] No data or invalid data length');
             return;
         }
 
         const bytesPerCoord = this.pointBytes;
         if (typeof bytesPerCoord !== 'number') {
+            console.log('[setPoints] Invalid bytesPerCoord:', bytesPerCoord);
             return;
         }
 
-        const pointByteLength = bytesPerCoord * 2;
         const totalBytes = data.length;
+        console.log(`[setPoints] Processing ${this.opcode.id} with ${totalBytes} bytes, bytesPerCoord: ${bytesPerCoord}`);
 
+        // Handle single-point commands (POINT SET ABS, LINE REL, etc.)
+        // These commands have exactly 3 bytes (1.5 bytes per coordinate)
+        if (totalBytes === 3) {
+            console.log('[setPoints] Single-point command detected, using 1.5 bytes per coordinate');
+            
+            // Extract coordinates using 1.5 bytes per coordinate
+            const rawX = [data[0].c.charCodeAt(0), data[1].c.charCodeAt(0)];
+            const rawY = [data[1].c.charCodeAt(0), data[2].c.charCodeAt(0)];
+            
+            console.log('[setPoints] Raw bytes - X:', rawX, 'Y:', rawY);
+            
+            const xVal = this.decodeCoord(rawX);
+            const yVal = this.decodeCoord(rawY);
+            
+            console.log('[setPoints] Decoded coordinates:', xVal, yVal);
+            
+            this.points.push([xVal, yVal]);
+            return;
+        }
+
+        // Handle multi-point commands (polygons, etc.)
+        const pointByteLength = bytesPerCoord * 2;
+        
         if (totalBytes % pointByteLength !== 0) {
+            console.log(`[setPoints] Data length ${totalBytes} is not a multiple of ${pointByteLength}`);
             return;
         }
 
         const pointCount = totalBytes / pointByteLength;
         this.points = [];
+        
+        console.log(`[setPoints] Multi-point command, extracting ${pointCount} points`);
 
         for (let i = 0; i < totalBytes; i += pointByteLength) {
             // Extract the raw byte values from NapData objects using .c.charCodeAt(0)
@@ -1070,23 +1098,33 @@ class NapCmd {
             const rawY = data.slice(i + bytesPerCoord, i + pointByteLength).map(d => d.c.charCodeAt(0));
 
             if (rawX.length !== bytesPerCoord || rawY.length !== bytesPerCoord) {
+                console.log(`[setPoints] Invalid coordinate lengths at index ${i}: X=${rawX.length}, Y=${rawY.length}`);
                 continue;
             }
 
             const xVal = this.decodeCoord(rawX);
             const yVal = this.decodeCoord(rawY);
 
+            console.log(`[setPoints] Point ${i/pointByteLength}: X=${xVal}, Y=${yVal} (from bytes X:${rawX}, Y:${rawY})`);
+
             this.points.push([xVal, yVal]);
         }
+        
+        console.log(`[setPoints] Extracted ${this.points.length} points for ${this.opcode.id}`);
     }
 
     // Debug version of decodeCoord
     decodeCoord(bytes) {
+        console.log(`[decodeCoord] Decoding ${bytes.length} bytes:`, bytes);
+        
         let result = 0;
         for (let i = 0; i < bytes.length; i++) {
             const value = (bytes[i] & 0x3F); // strip high 2 bits
             result = (result << 6) | value;
+            console.log(`[decodeCoord] Byte ${i}: ${bytes[i]} -> ${value} (masked), result: ${result}`);
         }
+        
+        console.log(`[decodeCoord] Final result: ${result}`);
         return result;
     }
 
