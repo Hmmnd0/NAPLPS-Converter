@@ -1079,7 +1079,43 @@ class NapCmd {
             return;
         }
 
-        // Handle multi-point commands (polygons, etc.)
+        // Handle polygon commands (SET & POLY FILLED, etc.)
+        if (this.opcode.id === 'SET & POLY FILLED' || this.opcode.id === 'SET & POLY OUTLINE') {
+            console.log('[setPoints] Polygon command detected, processing as packed coordinates');
+            
+            // For polygon commands, coordinates are packed as 12-bit values
+            // Each coordinate uses 2 bytes (1.5 bytes per coordinate)
+            const coordByteLength = 2; // 2 bytes per coordinate
+            const pointByteLength = coordByteLength * 2; // 4 bytes per point (X,Y)
+            
+            // Handle cases where data length is not a perfect multiple of 4
+            // This might happen due to padding or different data structures
+            const maxPoints = Math.floor(totalBytes / pointByteLength);
+            const actualBytes = maxPoints * pointByteLength;
+            
+            console.log(`[setPoints] Polygon data: ${totalBytes} bytes, extracting up to ${maxPoints} points (using ${actualBytes} bytes)`);
+
+            this.points = [];
+
+            for (let i = 0; i < actualBytes; i += pointByteLength) {
+                // Extract X coordinate (2 bytes)
+                const rawX = [data[i].c.charCodeAt(0), data[i + 1].c.charCodeAt(0)];
+                // Extract Y coordinate (2 bytes)
+                const rawY = [data[i + 2].c.charCodeAt(0), data[i + 3].c.charCodeAt(0)];
+
+                const xVal = this.decodeCoord(rawX);
+                const yVal = this.decodeCoord(rawY);
+
+                console.log(`[setPoints] Polygon point ${i/pointByteLength}: X=${xVal}, Y=${yVal} (from bytes X:${rawX}, Y:${rawY})`);
+
+                this.points.push([xVal, yVal]);
+            }
+            
+            console.log(`[setPoints] Extracted ${this.points.length} polygon points for ${this.opcode.id}`);
+            return;
+        }
+
+        // Handle multi-point commands (other commands)
         const pointByteLength = bytesPerCoord * 2;
         
         if (totalBytes % pointByteLength !== 0) {
@@ -1741,5 +1777,11 @@ if (typeof window !== 'undefined') {
     window.NapDataArray = NapDataArray;
     window.NapVector = NapVector;
     window.NapText = NapText;
+    
+    // Export global color variables for TelidonP5.js access
+    window.naplps_lastColor = naplps_lastColor;
+    window.naplps_colorMap = naplps_colorMap;
+    window.naplps_lastIndex = naplps_lastIndex;
+    window.naplps_colorMode = naplps_colorMode;
 }
 

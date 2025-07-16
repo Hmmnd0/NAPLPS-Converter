@@ -420,7 +420,16 @@ class TelidonDrawCmd {
             case("SET COLOR"): // this picks a color
                 debugLog('TelidonDrawCmd', 'SET COLOR', { color: this.cmd.col });
                 console.log(`[TelidonDrawCmd] SET COLOR: ${JSON.stringify(this.cmd.col)}`);
-				this.setColor(this.cmd.col);  
+                // Handle color from naplps.js - should be a Vector3 object with x,y,z properties
+                if (this.cmd.col && typeof this.cmd.col.x !== 'undefined' && typeof this.cmd.col.y !== 'undefined' && typeof this.cmd.col.z !== 'undefined') {
+                    this.setColor(this.cmd.col);
+                } else if (typeof window.naplps_lastColor !== 'undefined' && window.naplps_lastColor) {
+                    // Fallback to global color from naplps.js
+                    console.log(`[TelidonDrawCmd] SET COLOR: Using global naplps_lastColor: ${JSON.stringify(window.naplps_lastColor)}`);
+                    this.setColor(window.naplps_lastColor);
+                } else {
+                    console.log(`[TelidonDrawCmd] SET COLOR: Invalid color object: ${JSON.stringify(this.cmd.col)}`);
+                }
                 break;
             case("WAIT"):
                 debugLog('TelidonDrawCmd', 'WAIT');
