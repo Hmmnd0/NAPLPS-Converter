@@ -174,7 +174,7 @@ class TelidonDrawCmd {
 
         this.points = [];
         this.pointsIndex = 0;
-        this.maxCoord = 10000; // Increased from 50 to handle larger NAPLPS coordinate values
+        this.maxCoord = 50000; // Adjusted to better match the coordinate range - most coordinates are in 0-50000 range
 
         console.log('[TelidonDrawCmd] Constructor called', { 
             opcode: _cmd.opcode.id,
@@ -392,6 +392,11 @@ class TelidonDrawCmd {
                 break;
             case("SET & POLY FILLED"): // relative points after first 
                 debugLog('TelidonDrawCmd', 'SET & POLY FILLED', { points: this.points.length });
+                console.log(`[TelidonDrawCmd] SET & POLY FILLED: ${this.points.length} points, canvas: ${this.w}x${this.h}`);
+                if (this.points.length > 0) {
+                    console.log(`[TelidonDrawCmd] First point: (${this.points[0].x}, ${this.points[0].y}) -> canvas(${this.points[0].x * this.w}, ${this.points[0].y * this.h})`);
+                    console.log(`[TelidonDrawCmd] Last point: (${this.points[this.points.length-1].x}, ${this.points[this.points.length-1].y}) -> canvas(${this.points[this.points.length-1].x * this.w}, ${this.points[this.points.length-1].y * this.h})`);
+                }
         		this.drawPolygon(this.points, this.w, this.h, true);
                 break;
             //~ ~ ~ INCREMENTALS ~ ~ ~
@@ -414,6 +419,7 @@ class TelidonDrawCmd {
             //~ ~ ~ ENVIRONMENT, part 2 ~ ~ ~ 
             case("SET COLOR"): // this picks a color
                 debugLog('TelidonDrawCmd', 'SET COLOR', { color: this.cmd.col });
+                console.log(`[TelidonDrawCmd] SET COLOR: ${JSON.stringify(this.cmd.col)}`);
 				this.setColor(this.cmd.col);  
                 break;
             case("WAIT"):
@@ -498,6 +504,7 @@ class TelidonDrawCmd {
                 // Normalize coordinates to 0-1 range
                 const normalizedX = Math.max(0, Math.min(1, xVal / this.maxCoord));
                 const normalizedY = Math.max(0, Math.min(1, yVal / this.maxCoord));
+                console.log(`[TelidonDrawCmd] Normalizing: raw(${xVal}, ${yVal}) -> normalized(${normalizedX}, ${normalizedY}) [maxCoord: ${this.maxCoord}]`);
                 
                 this.points.push({
                     x: normalizedX,
@@ -579,8 +586,17 @@ class TelidonDrawCmd {
     }
 
     setColor(v) {
+        console.log(`[TelidonDrawCmd] setColor called with: ${JSON.stringify(v)}`);
         if (this.p && typeof this.p.color === 'function') {
-            this.col = this.p.color(v.x, v.y, v.z);
+            // Handle Vector3 object from naplps.js
+            if (v && typeof v.x !== 'undefined' && typeof v.y !== 'undefined' && typeof v.z !== 'undefined') {
+                this.col = this.p.color(v.x, v.y, v.z);
+                console.log(`[TelidonDrawCmd] Created p5 color from Vector3: ${this.col} (R:${v.x}, G:${v.y}, B:${v.z})`);
+            } else {
+                console.log(`[TelidonDrawCmd] Invalid color object: ${JSON.stringify(v)}`);
+            }
+        } else {
+            console.log(`[TelidonDrawCmd] p5 not available or color function not found`);
         }
     }
 
@@ -593,10 +609,22 @@ class TelidonDrawCmd {
     drawRect(points, w, h, isFill) { // PVector, w, h
         const p = this.p;
         
+        // Convert NAPLPS color to p5.js color
+        let color = 0; // default black
+        if (this.col) {
+            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
+                // RGB color from NAPLPS
+                color = p.color(this.col.x, this.col.y, this.col.z);
+            } else if (typeof this.col === 'number') {
+                // Grayscale value
+                color = this.col;
+            }
+        }
+        
         if (isFill) {
             // For filled shapes, set fill and no stroke
             if (p && typeof p.fill === 'function') {
-                p.fill(0);
+                p.fill(color);
             }
             if (p && typeof p.noStroke === 'function') {
                 p.noStroke();
@@ -607,7 +635,7 @@ class TelidonDrawCmd {
                 p.noFill();
             }
             if (p && typeof p.stroke === 'function') {
-                p.stroke(0);
+                p.stroke(color);
             }
             if (p && typeof p.strokeWeight === 'function') {
                 p.strokeWeight(1);
@@ -619,6 +647,8 @@ class TelidonDrawCmd {
             let y1 = points[0].y * h;
             let x2 = points[1].x * w;
             let y2 = points[1].y * h;
+            
+            console.log(`[TelidonDrawCmd] Drawing rect: normalized(${points[0].x}, ${points[0].y}) -> canvas(${x1}, ${y1}) to (${x2}, ${y2})`);
             
             if (p && typeof p.rectMode === 'function') p.rectMode(p.CORNER);
             if (p && typeof p.rect === 'function') {
@@ -647,10 +677,22 @@ class TelidonDrawCmd {
             });
         }
         
+        // Convert NAPLPS color to p5.js color
+        let color = 0; // default black
+        if (this.col) {
+            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
+                // RGB color from NAPLPS
+                color = p.color(this.col.x, this.col.y, this.col.z);
+            } else if (typeof this.col === 'number') {
+                // Grayscale value
+                color = this.col;
+            }
+        }
+        
         if (isFill) {
             // For filled shapes, set fill and no stroke
             if (p && typeof p.fill === 'function') {
-                p.fill(0);
+                p.fill(color);
                 debugLog('TelidonDrawCmd', 'Set fill for arc');
             }
             if (p && typeof p.noStroke === 'function') {
@@ -664,7 +706,7 @@ class TelidonDrawCmd {
                 debugLog('TelidonDrawCmd', 'Set noFill for arc');
             }
             if (p && typeof p.stroke === 'function') {
-                p.stroke(0);
+                p.stroke(color);
                 debugLog('TelidonDrawCmd', 'Set stroke for arc');
             }
             if (p && typeof p.strokeWeight === 'function') {
@@ -709,9 +751,21 @@ class TelidonDrawCmd {
     drawPoints(points, w, h) { // PVector, w, h - for individual points
         const p = this.p;
         
+        // Convert NAPLPS color to p5.js color
+        let color = 0; // default black
+        if (this.col) {
+            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
+                // RGB color from NAPLPS
+                color = p.color(this.col.x, this.col.y, this.col.z);
+            } else if (typeof this.col === 'number') {
+                // Grayscale value
+                color = this.col;
+            }
+        }
+        
         // Set stroke for points
         if (p && typeof p.stroke === 'function') {
-            p.stroke(0);
+            p.stroke(color);
         }
         if (p && typeof p.strokeWeight === 'function') {
             p.strokeWeight(2);
@@ -737,9 +791,21 @@ class TelidonDrawCmd {
     drawLines(points, w, h) { // PVector, w, h
         const p = this.p;
         
+        // Convert NAPLPS color to p5.js color
+        let color = 0; // default black
+        if (this.col) {
+            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
+                // RGB color from NAPLPS
+                color = p.color(this.col.x, this.col.y, this.col.z);
+            } else if (typeof this.col === 'number') {
+                // Grayscale value
+                color = this.col;
+            }
+        }
+        
         // Set stroke for lines
         if (p && typeof p.stroke === 'function') {
-            p.stroke(0);
+            p.stroke(color);
         }
         if (p && typeof p.strokeWeight === 'function') {
             p.strokeWeight(1);
@@ -769,10 +835,32 @@ class TelidonDrawCmd {
     drawPolygon(points, w, h, isFill) { // PVector, w, h
         const p = this.p;
         
+        console.log(`[TelidonDrawCmd] Drawing polygon: ${points.length} points, isFill: ${isFill}, canvas: ${w}x${h}`);
+        if (points.length > 0) {
+            console.log(`[TelidonDrawCmd] First point: normalized(${points[0].x}, ${points[0].y}) -> canvas(${points[0].x * w}, ${points[0].y * h})`);
+            console.log(`[TelidonDrawCmd] Last point: normalized(${points[points.length-1].x}, ${points[points.length-1].y}) -> canvas(${points[points.length-1].x * w}, ${points[points.length-1].y * h})`);
+        }
+        
+        // Convert NAPLPS color to p5.js color
+        let color = 0; // default black
+        if (this.col) {
+            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
+                // RGB color from NAPLPS
+                color = p.color(this.col.x, this.col.y, this.col.z);
+                console.log(`[TelidonDrawCmd] Using RGB color: (${this.col.x}, ${this.col.y}, ${this.col.z})`);
+            } else if (typeof this.col === 'number') {
+                // Grayscale value
+                color = this.col;
+                console.log(`[TelidonDrawCmd] Using grayscale color: ${this.col}`);
+            }
+        } else {
+            console.log(`[TelidonDrawCmd] No color set, using black`);
+        }
+        
         if (isFill) {
             // For filled shapes, set fill and no stroke
             if (p && typeof p.fill === 'function') {
-                p.fill(0);
+                p.fill(color);
             }
             if (p && typeof p.noStroke === 'function') {
                 p.noStroke();
@@ -783,7 +871,7 @@ class TelidonDrawCmd {
                 p.noFill();
             }
             if (p && typeof p.stroke === 'function') {
-                p.stroke(0);
+                p.stroke(color);
             }
             if (p && typeof p.strokeWeight === 'function') {
                 p.strokeWeight(1);
