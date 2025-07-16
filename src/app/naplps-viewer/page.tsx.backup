@@ -1,0 +1,120 @@
+"use client";
+import React, { useRef } from "react";
+
+export default function NaplpsViewer() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Load Telidon scripts on mount
+  React.useEffect(() => {
+    const scripts = [
+      "/telidon/p5.min.js",
+      "/telidon/naplps.js",
+      "/telidon/TelidonP5.js",
+    ];
+    scripts.forEach((src) => {
+      if (!document.querySelector(`script[src='${src}']`)) {
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = false;
+        document.body.appendChild(script);
+      }
+    });
+  }, []);
+
+  // Handle file upload and render
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const arrayBuffer = event.target?.result;
+      if (!arrayBuffer) return;
+      
+      // Clear previous content
+      if (canvasRef.current) {
+        canvasRef.current.innerHTML = '<span class="text-gray-400">Loading...</span>';
+      }
+      
+      // Wait for TelidonP5 to be loaded
+      const tryRender = () => {
+        // @ts-ignore
+        if (window.p5 && window.TelidonDraw) {
+          // @ts-ignore
+          const dataArray = Array.from(new Uint8Array(arrayBuffer as ArrayBuffer));
+          
+          // Create a p5.js sketch
+          const sketch = (p: any) => {
+            let telidonDraw: any;
+            
+            p.setup = () => {
+              const canvas = p.createCanvas(400, 400);
+              canvas.parent(canvasRef.current);
+              p.background(240);
+              console.log('[p5] setup complete, canvas created.');
+              
+              // Create TelidonDraw with the file data and pass p
+              telidonDraw = new window.TelidonDraw([dataArray], 400, 400, p);
+            };
+            
+            p.draw = () => {
+              p.background(240);
+              // TEMP: Prove canvas is working
+              p.fill(255, 0, 0);
+              p.ellipse(100, 100, 50, 50);
+              console.log('[p5] drew debug red ellipse at (100,100)');
+              // TEMP: Draw a hardcoded green box
+              p.fill(0, 255, 0);
+              p.beginShape();
+              p.vertex(100, 100);
+              p.vertex(300, 100);
+              p.vertex(300, 300);
+              p.vertex(100, 300);
+              p.endShape(p.CLOSE);
+              console.log('[p5] drew hardcoded green box.');
+              if (telidonDraw && !telidonDraw.finished) {
+                console.log('[p5] calling telidonDraw.draw()');
+                telidonDraw.draw();
+              } else {
+                console.log('[p5] telidonDraw not ready or finished');
+              }
+            };
+          };
+          
+          // Create the p5 instance
+          new window.p5(sketch);
+        } else {
+          setTimeout(tryRender, 200);
+        }
+      };
+      tryRender();
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto py-8">
+      <h1 className="text-2xl font-bold mb-4">NAPLPS Viewer (TelidonP5.js)</h1>
+      <input
+        type="file"
+        accept=".nap,application/octet-stream"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="mb-4"
+      />
+      <div
+        ref={canvasRef}
+        id="telidon-canvas"
+        className="border rounded bg-gray-100 min-h-[400px] flex items-center justify-center"
+        style={{ minHeight: 400 }}
+      >
+        <span className="text-gray-400">Upload a .nap file to view</span>
+      </div>
+      <div className="mt-4 text-sm text-gray-600">
+        <p>
+          Powered by <a href="https://github.com/n1ckfg/Telidon" target="_blank" rel="noopener noreferrer" className="underline">TelidonP5.js</a> (<a href="https://n1ckfg.github.io/Telidon/" target="_blank" rel="noopener noreferrer" className="underline">demo</a>)
+        </p>
+      </div>
+    </div>
+  );
+} 
