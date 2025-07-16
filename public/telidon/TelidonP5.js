@@ -324,19 +324,19 @@ class TelidonDrawCmd {
             //~ ~ ~ LINES ~ ~ ~
             case("LINE ABS"):
                 debugLog('TelidonDrawCmd', 'LINE ABS', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h);
+        		this.drawLines(this.points, this.w, this.h);
                 break;
             case("LINE REL"):
                 debugLog('TelidonDrawCmd', 'LINE REL', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h);
+        		this.drawLines(this.points, this.w, this.h);
                 break;
             case("SET & LINE ABS"):
                 debugLog('TelidonDrawCmd', 'SET & LINE ABS', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h);
+        		this.drawLines(this.points, this.w, this.h);
                 break;
             case("SET & LINE REL"):
                 debugLog('TelidonDrawCmd', 'SET & LINE REL', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h);
+        		this.drawLines(this.points, this.w, this.h);
             	break;
             //~ ~ ~ ARCS ~ ~ ~
             case("ARC OUTLINED"):
@@ -375,22 +375,19 @@ class TelidonDrawCmd {
             //~ ~ ~ POLYGONS ~ ~ ~
             case("POLY OUTLINED"):
                 debugLog('TelidonDrawCmd', 'POLY OUTLINED', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h, false);
+        		this.drawPolygon(this.points, this.w, this.h, false);
                 break;
             case("POLY FILLED"):
                 debugLog('TelidonDrawCmd', 'POLY FILLED', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h, true);
+        		this.drawPolygon(this.points, this.w, this.h, true);
                 break;
             case("SET & POLY OUTLINED"): // relative points after first 
                 debugLog('TelidonDrawCmd', 'SET & POLY OUTLINED', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h, false);
+        		this.drawPolygon(this.points, this.w, this.h, false);
                 break;
             case("SET & POLY FILLED"): // relative points after first 
                 debugLog('TelidonDrawCmd', 'SET & POLY FILLED', { points: this.points.length });
-        		this.drawPoints(this.points, this.w, this.h, true);//this.tex.width, this.tex.height);
-                //for (let j=0; j<cmd.points.length; j++) {
-                    //console.log(j + ". " + cmd.points[j]);
-                //}
+        		this.drawPolygon(this.points, this.w, this.h, true);
                 break;
             //~ ~ ~ INCREMENTALS ~ ~ ~
             case("FIELD"):
@@ -704,7 +701,67 @@ class TelidonDrawCmd {
         }
     }
 
-    drawPoints(points, w, h, isFill) { // PVector, w, h
+    drawPoints(points, w, h) { // PVector, w, h - for individual points
+        const p = this.p;
+        
+        // Set stroke for points
+        if (p && typeof p.stroke === 'function') {
+            p.stroke(0);
+        }
+        if (p && typeof p.strokeWeight === 'function') {
+            p.strokeWeight(2);
+        }
+        if (p && typeof p.noFill === 'function') {
+            p.noFill();
+        }
+        
+        // Draw each point
+        for (let i=0; i<points.length; i++) {
+            let pt = points[i]; // PVector
+            let sx = pt.x * w;
+            let sy = pt.y * h;
+            
+            if (p && typeof p.point === 'function') {
+                p.point(sx, sy);
+            }
+        }
+        
+        window.NAPLPS_DEBUG.shapesDrawn++;
+    }
+    
+    drawLines(points, w, h) { // PVector, w, h
+        const p = this.p;
+        
+        // Set stroke for lines
+        if (p && typeof p.stroke === 'function') {
+            p.stroke(0);
+        }
+        if (p && typeof p.strokeWeight === 'function') {
+            p.strokeWeight(1);
+        }
+        if (p && typeof p.noFill === 'function') {
+            p.noFill();
+        }
+        
+        // Draw lines between consecutive points
+        for (let i=0; i<points.length-1; i++) {
+            let pt1 = points[i];
+            let pt2 = points[i+1];
+            
+            let x1 = pt1.x * w;
+            let y1 = pt1.y * h;
+            let x2 = pt2.x * w;
+            let y2 = pt2.y * h;
+            
+            if (p && typeof p.line === 'function') {
+                p.line(x1, y1, x2, y2);
+            }
+        }
+        
+        window.NAPLPS_DEBUG.shapesDrawn++;
+    }
+    
+    drawPolygon(points, w, h, isFill) { // PVector, w, h
         const p = this.p;
         
         if (isFill) {
@@ -741,30 +798,11 @@ class TelidonDrawCmd {
             if (p && typeof p.vertex === 'function') {
                 p.vertex(sx, sy);
             }
-            
-            if (i === points.length-1) {
-                let s0x = points[0].x * w;
-                let s0y = points[0].y * h;
-                if (p && typeof p.vertex === 'function') {
-                    p.vertex(s0x, s0y);
-                }
-            }
         }
         
         if (p && typeof p.endShape === 'function') {
             p.endShape(p.CLOSE);
             window.NAPLPS_DEBUG.shapesDrawn++;
-        }
-        
-        if (this.labelPoints) {
-            if (p && typeof p.stroke === 'function') p.stroke(255, 63);
-            if (p && typeof p.strokeWeight === 'function') p.strokeWeight(this.thickness * 4);
-            for (let i=0; i<points.length; i++) {
-                let pt = points[i]; // PVector
-                let sx = pt.x * w;
-                let sy = pt.y * h;
-                if (p && typeof p.point === 'function') p.point(sx, sy);
-            }
         }
     }
     
