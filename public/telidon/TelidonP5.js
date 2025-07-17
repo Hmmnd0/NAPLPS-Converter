@@ -3,6 +3,26 @@
 // Constants
 const PI = Math.PI;
 
+// NAPLPS/RHINO default color palette (16 colors, 0-8191 range for each channel)
+const NAPLPS_PALETTE = [
+    { r: 0,    g: 0,    b: 0 },      // Black
+    { r: 1024, g: 1024, b: 1024 },  // Gray 1
+    { r: 2048, g: 2048, b: 2048 },  // Gray 2
+    { r: 3072, g: 3072, b: 3072 },  // Gray 3
+    { r: 4096, g: 4096, b: 4096 },  // Gray 4
+    { r: 5120, g: 5120, b: 5120 },  // Gray 5
+    { r: 6144, g: 6144, b: 6144 },  // Gray 6
+    { r: 8191, g: 8191, b: 8191 },  // White
+    { r: 0,    g: 0,    b: 7168 },  // Blue
+    { r: 0,    g: 5120, b: 7168 },  // Cyan
+    { r: 0,    g: 7168, b: 4096 },  // Green
+    { r: 2048, g: 7168, b: 0 },     // Yellow-Green
+    { r: 7168, g: 7168, b: 0 },     // Yellow
+    { r: 7168, g: 2048, b: 0 },     // Orange
+    { r: 7168, g: 0,    b: 4096 },  // Magenta
+    { r: 5120, g: 0,    b: 7168 }   // Purple
+];
+
 // Global debug state
 window.NAPLPS_DEBUG = {
     totalCommands: 0,
@@ -213,15 +233,35 @@ class TelidonDrawCmd {
             console.log('[TelidonDrawCmd] Found points in command:', this.cmd.points.length);
             console.log('[TelidonDrawCmd] First few points from naplps.js:', this.cmd.points.slice(0, 3));
             
+            // RHINO-style coordinate system
+            const ONE = 8192; // base coordinate system
+            const zoom = 4; // RHINO's default zoom
+            const xpos = 64; // RHINO's default left x pos
+            const ypos = 399; // RHINO's default under y pos
+            
+            // RHINO's scaling functions
+            const SCALE = (d) => ((d) >> zoom);
+            const X_SCALE = (d) => (xpos + (SCALE(d)));
+            const Y_SCALE = (d) => (ypos - (SCALE(d)));
+            
             this.points = this.cmd.points.map(p => {
-                // Use raw coordinates directly like naplps.js does - no normalization needed
-                // NAPLPS coordinates are typically in 0-4095 range (12-bit values)
-                const x = p[0] / 4095; // Normalize to 0-1 range
-                const y = p[1] / 4095; // Normalize to 0-1 range
-                console.log(`[TelidonDrawCmd] Converting point: [${p[0]}, ${p[1]}] -> [${x}, ${y}]`);
+                // Use RHINO's coordinate approach
+                const rawX = p[0];
+                const rawY = p[1];
+                
+                // Apply RHINO's scaling and positioning
+                const scaledX = X_SCALE(rawX);
+                const scaledY = Y_SCALE(rawY);
+                
+                // Convert to canvas coordinates (0-1 range)
+                const canvasX = scaledX / this.w;
+                const canvasY = scaledY / this.h;
+                
+                console.log(`[TelidonDrawCmd] RHINO conversion: raw(${rawX}, ${rawY}) -> scaled(${scaledX}, ${scaledY}) -> canvas(${canvasX}, ${canvasY})`);
+                
                 return {
-                    x: x,
-                    y: y
+                    x: canvasX,
+                    y: canvasY
                 };
             });
             console.log('[TelidonDrawCmd] Converted', this.points.length, 'points from command');
@@ -612,9 +652,12 @@ class TelidonDrawCmd {
                 this.col = this.p.color(v.x, v.y, v.z);
                 console.log(`[TelidonDrawCmd] Created p5 color from Vector3: ${this.col} (R:${v.x}, G:${v.y}, B:${v.z})`);
             } else if (typeof v === 'number') {
-                // Handle color index - convert to RGB
-                this.col = this.p.color(v, v, v); // Grayscale
-                console.log(`[TelidonDrawCmd] Created p5 color from index: ${this.col} (index:${v})`);
+                // Handle color index - convert to RGB using palette
+                let paletteIndex = v;
+                if (paletteIndex < 0 || paletteIndex >= NAPLPS_PALETTE.length) paletteIndex = 0;
+                const rgb = NAPLPS_PALETTE[paletteIndex];
+                this.col = this.p.color(rgb.r, rgb.g, rgb.b);
+                console.log(`[TelidonDrawCmd] Created p5 color from palette index: ${paletteIndex} (R:${rgb.r}, G:${rgb.g}, B:${rgb.b})`);
             } else {
                 console.log(`[TelidonDrawCmd] Invalid color object: ${JSON.stringify(v)}`);
             }
@@ -630,56 +673,47 @@ class TelidonDrawCmd {
     }
 
     drawRect(points, w, h, isFill) { // PVector, w, h
-        const p = this.p;
-        
-        // Convert NAPLPS color to p5.js color
-        let color = 0; // default black
-        if (this.col) {
-            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
-                // RGB color from NAPLPS
-                color = p.color(this.col.x, this.col.y, this.col.z);
-            } else if (typeof this.col === 'number') {
-                // Grayscale value
-                color = this.col;
-            }
+        if (!this.p || points.length < 2) {
+            console.log(`[TelidonDrawCmd] drawRect: Invalid points or p5 not available`);
+            return;
         }
-        
-        if (isFill) {
-            // For filled shapes, set fill and no stroke
-            if (p && typeof p.fill === 'function') {
-                p.fill(color);
-            }
-            if (p && typeof p.noStroke === 'function') {
-                p.noStroke();
-            }
-        } else {
-            // For outlined shapes, set stroke and no fill
-            if (p && typeof p.noFill === 'function') {
-                p.noFill();
-            }
-            if (p && typeof p.stroke === 'function') {
-                p.stroke(color);
-            }
-            if (p && typeof p.strokeWeight === 'function') {
-                p.strokeWeight(1);
-            }
-        }
-        
+
+        // RHINO's rectangle drawing algorithm
+        console.log(`[TelidonDrawCmd] drawRect: ${points.length} points, fill: ${isFill}`);
+
         if (points.length == 2) {
-            let x1 = points[0].x * w;
-            let y1 = points[0].y * h;
-            let x2 = points[1].x * w;
-            let y2 = points[1].y * h;
+            // RHINO's approach: Two points define rectangle corners
+            const x1 = points[0].x * w;
+            const y1 = points[0].y * h;
+            const x2 = points[1].x * w;
+            const y2 = points[1].y * h;
             
-            console.log(`[TelidonDrawCmd] Drawing rect: normalized(${points[0].x}, ${points[0].y}) -> canvas(${x1}, ${y1}) to (${x2}, ${y2})`);
-            
-            if (p && typeof p.rectMode === 'function') p.rectMode(p.CORNER);
-            if (p && typeof p.rect === 'function') {
-                p.rect(x1, y1, x2-x1, y2-y1);
-                window.NAPLPS_DEBUG.shapesDrawn++;
+            console.log(`[TelidonDrawCmd] Drawing rect: (${x1}, ${y1}) to (${x2}, ${y2})`);
+
+            if (isFill) {                // RHINO's filled rectangle
+                if (this.col) {
+                    this.p.fill(this.col);
+                    this.p.noStroke();
+                } else {
+                    this.p.fill(255);
+                    this.p.noStroke();
+                }
+                this.p.rectMode(this.p.CORNER);
+                this.p.rect(x1, y1, x2-x1, y2-y1);
+            } else {                // RHINO's outlined rectangle
+                if (this.col) {
+                    this.p.stroke(this.col);
+                    this.p.noFill();
+                } else {
+                    this.p.stroke(255);
+                    this.p.noFill();
+                }
+                this.p.rectMode(this.p.CORNER);
+                this.p.rect(x1, y1, x2-x1, y2-y1);
             }
         } else {
-            this.drawPoints(points, w, h);
+            // Multiple points - treat as polygon
+            this.drawPolygon(points, w, h, isFill);
         }
     }
 
@@ -772,146 +806,127 @@ class TelidonDrawCmd {
     }
 
     drawPoints(points, w, h) { // PVector, w, h - for individual points
-        const p = this.p;
-        
-        // Convert NAPLPS color to p5.js color
-        let color = 0; // default black
+        if (!this.p || points.length < 1) {
+            console.log(`[TelidonDrawCmd] drawPoints: Invalid points or p5 not available`);
+            return;
+        }
+
+        // RHINO's point drawing algorithm
+        console.log(`[TelidonDrawCmd] drawPoints: ${points.length} points`);
+
+        // Set fill color for points
         if (this.col) {
-            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
-                // RGB color from NAPLPS
-                color = p.color(this.col.x, this.col.y, this.col.z);
-            } else if (typeof this.col === 'number') {
-                // Grayscale value
-                color = this.col;
-            }
-        }
-        
-        // Set stroke for points
-        if (p && typeof p.stroke === 'function') {
-            p.stroke(color);
-        }
-        if (p && typeof p.strokeWeight === 'function') {
-            p.strokeWeight(2);
-        }
-        if (p && typeof p.noFill === 'function') {
-            p.noFill();
-        }
-        
-        // Draw each point
-        for (let i=0; i<points.length; i++) {
-            let pt = points[i]; // PVector
-            let sx = pt.x * w;
-            let sy = pt.y * h;
-            
-            if (p && typeof p.point === 'function') {
-                p.point(sx, sy);
-            }
-        }
-        
-        window.NAPLPS_DEBUG.shapesDrawn++;
-    }
-    
-    drawLines(points, w, h) { // PVector, w, h
-        const p = this.p;
-        
-        // Convert NAPLPS color to p5.js color
-        let color = 0; // default black
-        if (this.col) {
-            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
-                // RGB color from NAPLPS
-                color = p.color(this.col.x, this.col.y, this.col.z);
-            } else if (typeof this.col === 'number') {
-                // Grayscale value
-                color = this.col;
-            }
-        }
-        
-        // Set stroke for lines
-        if (p && typeof p.stroke === 'function') {
-            p.stroke(color);
-        }
-        if (p && typeof p.strokeWeight === 'function') {
-            p.strokeWeight(1);
-        }
-        if (p && typeof p.noFill === 'function') {
-            p.noFill();
-        }
-        
-        // Draw lines between consecutive points
-        for (let i=0; i<points.length-1; i++) {
-            let pt1 = points[i];
-            let pt2 = points[i+1];
-            
-            let x1 = pt1.x * w;
-            let y1 = pt1.y * h;
-            let x2 = pt2.x * w;
-            let y2 = pt2.y * h;
-            
-            if (p && typeof p.line === 'function') {
-                p.line(x1, y1, x2, y2);
-            }
-        }
-        
-        window.NAPLPS_DEBUG.shapesDrawn++;
-    }
-    
-    drawPolygon(points, w, h, isFill) { // PVector, w, h
-        const p = this.p;
-        
-        console.log(`[TelidonDrawCmd] Drawing polygon: ${points.length} points, isFill: ${isFill}, canvas: ${w}x${h}`);
-        if (points.length > 0) {
-            console.log(`[TelidonDrawCmd] First point: normalized(${points[0].x}, ${points[0].y}) -> canvas(${points[0].x * w}, ${points[0].y * h})`);
-            console.log(`[TelidonDrawCmd] Last point: normalized(${points[points.length-1].x}, ${points[points.length-1].y}) -> canvas(${points[points.length-1].x * w}, ${points[points.length-1].y * h})`);
-        }
-        
-        // Use the color that was set by setColor method
-        let color = this.col || 0; // default black if no color set
-        console.log(`[TelidonDrawCmd] Using color for polygon:`, color);
-        
-        if (isFill) {
-            // For filled shapes, set fill and no stroke
-            if (p && typeof p.fill === 'function') {
-                p.fill(color);
-                console.log(`[TelidonDrawCmd] fill() called with color:`, color);
-            }
-            if (p && typeof p.noStroke === 'function') {
-                p.noStroke();
-                console.log(`[TelidonDrawCmd] noStroke() called`);
-            }
+            this.p.fill(this.col);
+            this.p.noStroke();
         } else {
-            // For outlined shapes, set stroke and no fill
-            if (p && typeof p.noFill === 'function') {
-                p.noFill();
-                console.log(`[TelidonDrawCmd] noFill() called`);
-            }
-            if (p && typeof p.stroke === 'function') {
-                p.stroke(color);
-                console.log(`[TelidonDrawCmd] stroke() called with color:`, color);
-            }
-            if (p && typeof p.strokeWeight === 'function') {
-                p.strokeWeight(1);
-                console.log(`[TelidonDrawCmd] strokeWeight(1) called`);
-            }
+            this.p.fill(255);
+            this.p.noStroke();
         }
-        
-        if (p && typeof p.beginShape === 'function') {
-            p.beginShape();
-        }
-        
-        for (let i=0; i<points.length; i++) {
-            let pt = points[i]; // PVector
-            // Coordinates are already normalized to 0-1, so just multiply by canvas dimensions
-            let sx = pt.x * w;
-            let sy = pt.y * h;
+
+        // RHINO's approach: Draw each point as a small rectangle
+        // This matches RHINO's point() function which draws a pixel or small box
+        for (let i = 0; i < points.length; i++) {
+            const x = points[i].x * w;
+            const y = points[i].y * h;
             
-            if (p && typeof p.vertex === 'function') {
-                p.vertex(sx, sy);
-            }
+            // RHINO's point size handling - draw a 2x2 pixel for visibility
+            this.p.rect(x - 1, y - 1, 2, 2);
         }
-        
-        if (p && typeof p.endShape === 'function') {
-            p.endShape(p.CLOSE);
-            window.NAPLPS_DEBUG.shapesDrawn++;
+    }
+    
+    drawPolygon(points, w, h, isFill) {
+        if (!this.p || points.length < 3) {
+            console.log(`[TelidonDrawCmd] drawPolygon: Invalid points or p5 not available`);
+            return;
+        }
+
+        // RHINO-style polygon drawing with proper coordinate transformation
+        const canvasPoints = points.map(p => ({
+            x: p.x * w,
+            y: p.y * h
+        }));
+
+        console.log(`[TelidonDrawCmd] drawPolygon: ${points.length} points, fill: ${isFill}`);
+
+        if (isFill) {
+            // RHINO's scan-line polygon fill algorithm
+            this.drawPolygonFill(canvasPoints);
+        } else {
+            // RHINOs outline drawing
+            this.drawPolygonOutline(canvasPoints);
+        }
+    }
+
+    // RHINO's scan-line polygon fill algorithm
+    drawPolygonFill(points) {
+        if (!this.p || points.length < 3) return;
+
+        // Set fill color
+        if (this.col) {
+            this.p.fill(this.col);
+            this.p.noStroke();
+        } else {
+            this.p.fill(255);
+            this.p.noStroke();
+        }
+
+        // RHINOs approach: Use p5's built-in polygon fill
+        // This is more efficient than implementing scan-line fill in JavaScript
+        this.p.beginShape();
+        for (let i = 0; i < points.length; i++) {
+            this.p.vertex(points[i].x, points[i].y);
+        }
+        this.p.endShape(this.p.CLOSE);
+    }
+
+    // RHINOs outline drawing
+    drawPolygonOutline(points) {
+        if (!this.p || points.length < 2) return;
+
+        // Set stroke color
+        if (this.col) {
+            this.p.stroke(this.col);
+            this.p.noFill();
+        } else {
+            this.p.stroke(255);
+            this.p.noFill();
+        }
+
+        // RHINO's approach: Draw connected lines
+        this.p.beginShape();
+        for (let i = 0; i < points.length; i++) {
+            this.p.vertex(points[i].x, points[i].y);
+        }
+        this.p.endShape(this.p.CLOSE);
+    }
+
+    drawLines(points, w, h) {
+        if (!this.p || points.length < 2) {
+            console.log(`[TelidonDrawCmd] drawLines: Invalid points or p5 not available`);
+            return;
+        }
+
+        // RHINO's Bresenham line drawing algorithm
+        console.log(`[TelidonDrawCmd] drawLines: ${points.length} points`);
+
+        // Set stroke color
+        if (this.col) {
+            this.p.stroke(this.col);
+            this.p.noFill();
+        } else {
+            this.p.stroke(255);
+            this.p.noFill();
+        }
+
+        // RHINO's approach: Draw connected lines using p5e function
+        for (let i = 0; i < points.length - 1; i++) {
+            const x1 = points[i].x * w;
+            const y1 = points[i].y * h;
+            const x2 = points[i + 1].x * w;
+            const y2 = points[i + 1].y * h;
+            
+            // RHINO's coordinate transformation applied
+            this.p.line(x1, y1, x2, y2);
         }
     }
     
