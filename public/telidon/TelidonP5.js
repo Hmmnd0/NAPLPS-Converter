@@ -3,6 +3,12 @@
 // Constants
 const PI = Math.PI;
 
+// RHINO/NSRC1469 coordinate system constants
+const naplps_ONE = 8192;
+const naplps_zoom = 4;
+const naplps_xpos = 64;
+const naplps_ypos = 399;
+
 // NAPLPS/RHINO default color palette (16 colors, 0-8191 range for each channel)
 const NAPLPS_PALETTE = [
     { r: 0,    g: 0,    b: 0 },      // Black
@@ -24,7 +30,7 @@ const NAPLPS_PALETTE = [
 ];
 
 // nsrc1469's HSB color conversion system
-const NAPLPS_HUE_TABLE = 
+const NAPLPS_HUE_TABLE = [
     { g: 0, r: 0, b: 7 }, { g: 0, r: 1, b: 7 }, { g: 0, r: 2, b: 7 }, { g: 0, r: 3, b: 7 },
     { g: 0, r: 4, b: 7 }, { g: 0, r: 5, b: 7 }, { g: 0, r: 6, b: 7 }, { g: 0, r: 7, b: 7 },
     { g: 0, r: 7, b: 6 }, { g: 0, r: 7, b: 5 }, { g: 0, r: 7, b: 4 }, { g: 0, r: 7, b: 3 },
@@ -293,9 +299,9 @@ class TelidonDrawCmd {
             
             // RHINO-style coordinate system
             const ONE = 8192; // base coordinate system
-            const zoom = 4; // RHINO's default zoom
+            const zoom = 2; // RHINO's default zoom - reduced from 4 to make shapes larger
             const xpos = 64; // RHINO's default left x pos
-            const ypos = 399; // RHINO's default under y pos
+            const ypos = 399; // RHINOs default under y pos
             
             // RHINO's scaling functions
             const SCALE = (d) => ((d) >> zoom);
@@ -307,13 +313,13 @@ class TelidonDrawCmd {
                 const rawX = p[0];
                 const rawY = p[1];
                 
-                // Apply RHINO's scaling and positioning
+                // Apply RHINO scaling
                 const scaledX = X_SCALE(rawX);
                 const scaledY = Y_SCALE(rawY);
                 
                 // Convert to canvas coordinates (0-1 range)
-                const canvasX = scaledX / this.w;
-                const canvasY = scaledY / this.h;
+                const canvasX = scaledX /800; // Assuming 800x600 canvas
+                const canvasY = scaledY /600; // Assuming 800x600 canvas // Assuming 600
                 
                 console.log(`[TelidonDrawCmd] RHINO conversion: raw(${rawX}, ${rawY}) -> scaled(${scaledX}, ${scaledY}) -> canvas(${canvasX}, ${canvasY})`);
                 
