@@ -174,7 +174,8 @@ class TelidonDrawCmd {
 
         this.points = [];
         this.pointsIndex = 0;
-        this.maxCoord = 50000; // Adjusted to better match the coordinate range - most coordinates are in 0-50000 range
+        this.maxCoord = 100000; // Increased to make shapes larger - coordinates are being normalized to very small values
+        console.log('[TelidonDrawCmd] maxCoord set to', this.maxCoord);
 
         console.log('[TelidonDrawCmd] Constructor called', { 
             opcode: _cmd.opcode.id,
@@ -200,18 +201,27 @@ class TelidonDrawCmd {
                 fullCommand: _cmd
             });
         }
+        
+        // Debug: Log the actual points from naplps.js for first few commands
+        if (_cmd.points && _cmd.points.length > 0) {
+            console.log('[TelidonDrawCmd] Raw points from naplps.js:', _cmd.points.slice(0, 5));
+        }
 
         // Extract coordinate data from NAPLPS command
         if (this.cmd && this.cmd.points && this.cmd.points.length > 0) {
             // The NapCmd already has coordinates extracted and stored as [x, y] arrays
             console.log('[TelidonDrawCmd] Found points in command:', this.cmd.points.length);
+            console.log('[TelidonDrawCmd] First few points from naplps.js:', this.cmd.points.slice(0, 3));
+            
             this.points = this.cmd.points.map(p => {
-                const normalizedX = Math.max(0, Math.min(1, p[0] / this.maxCoord));
-                const normalizedY = Math.max(0, Math.min(1, p[1] / this.maxCoord));
-                console.log(`[TelidonDrawCmd] Normalizing point: [${p[0]}, ${p[1]}] -> [${normalizedX}, ${normalizedY}]`);
+                // Use raw coordinates directly like naplps.js does - no normalization needed
+                // NAPLPS coordinates are typically in 0-4095 range (12-bit values)
+                const x = p[0] / 4095; // Normalize to 0-1 range
+                const y = p[1] / 4095; // Normalize to 0-1 range
+                console.log(`[TelidonDrawCmd] Converting point: [${p[0]}, ${p[1]}] -> [${x}, ${y}]`);
                 return {
-                    x: normalizedX,
-                    y: normalizedY
+                    x: x,
+                    y: y
                 };
             });
             console.log('[TelidonDrawCmd] Converted', this.points.length, 'points from command');
@@ -260,10 +270,8 @@ class TelidonDrawCmd {
     draw() {
         // *** IMPORTANT STEP 3 of 3 ***
         // This is where the decoded commands finally get drawn to the screen.
-        // Only log commands that have points to draw
-        if (this.points.length > 0) {
-            console.log('[TelidonDrawCmd] Processing command:', this.cmd.opcode.id, 'with', this.points.length, 'points');
-        }
+        // Log all commands, including control commands like SET COLOR
+        console.log('[TelidonDrawCmd] Processing command:', this.cmd.opcode.id, 'with', this.points.length, 'points');
         
         switch(this.cmd.opcode.id) {
         	//~ ~ ~ ~ ~ CONTROL CODES ~ ~ ~ ~ ~
@@ -510,14 +518,14 @@ class TelidonDrawCmd {
                 const xVal = this.decodeCoord(xBytes);
                 const yVal = this.decodeCoord(yBytes);
                 
-                // Normalize coordinates to 0-1 range
-                const normalizedX = Math.max(0, Math.min(1, xVal / this.maxCoord));
-                const normalizedY = Math.max(0, Math.min(1, yVal / this.maxCoord));
-                console.log(`[TelidonDrawCmd] Normalizing: raw(${xVal}, ${yVal}) -> normalized(${normalizedX}, ${normalizedY}) [maxCoord: ${this.maxCoord}]`);
+                // Normalize coordinates to 0-1 range using NAPLPS coordinate range (0-4095)
+                const x = xVal / 4095;
+                const y = yVal / 4095;
+                console.log(`[TelidonDrawCmd] Converting: raw(${xVal}, ${yVal}) -> normalized(${x}, ${y})`);
                 
                 this.points.push({
-                    x: normalizedX,
-                    y: normalizedY
+                    x: x,
+                    y: y
                 });
             }
         }
@@ -557,12 +565,13 @@ class TelidonDrawCmd {
                 const xVal = this.decodeCoord(xBytes);
                 const yVal = this.decodeCoord(yBytes);
                 
-                const normalizedX = Math.max(0, Math.min(1, xVal / this.maxCoord));
-                const normalizedY = Math.max(0, Math.min(1, yVal / this.maxCoord));
+                // Normalize coordinates to 0-1 range using NAPLPS coordinate range (0-4095)
+                const x = xVal / 4095;
+                const y = yVal / 4095;
                 
                 this.points.push({
-                    x: normalizedX,
-                    y: normalizedY
+                    x: x,
+                    y: y
                 });
             }
         }
@@ -576,8 +585,9 @@ class TelidonDrawCmd {
                 const y = this.cmd.processedData[i + 1];
                 
                 if (typeof x === 'number' && typeof y === 'number') {
-                    const normalizedX = Math.max(0, Math.min(1, x / this.maxCoord));
-                    const normalizedY = Math.max(0, Math.min(1, y / this.maxCoord));
+                    // Normalize coordinates to 0-1 range using NAPLPS coordinate range (0-4095)
+                    const normalizedX = x / 4095;
+                    const normalizedY = y / 4095;
                     
                     this.points.push({
                         x: normalizedX,
@@ -601,6 +611,10 @@ class TelidonDrawCmd {
             if (v && typeof v.x !== 'undefined' && typeof v.y !== 'undefined' && typeof v.z !== 'undefined') {
                 this.col = this.p.color(v.x, v.y, v.z);
                 console.log(`[TelidonDrawCmd] Created p5 color from Vector3: ${this.col} (R:${v.x}, G:${v.y}, B:${v.z})`);
+            } else if (typeof v === 'number') {
+                // Handle color index - convert to RGB
+                this.col = this.p.color(v, v, v); // Grayscale
+                console.log(`[TelidonDrawCmd] Created p5 color from index: ${this.col} (index:${v})`);
             } else {
                 console.log(`[TelidonDrawCmd] Invalid color object: ${JSON.stringify(v)}`);
             }
@@ -850,40 +864,33 @@ class TelidonDrawCmd {
             console.log(`[TelidonDrawCmd] Last point: normalized(${points[points.length-1].x}, ${points[points.length-1].y}) -> canvas(${points[points.length-1].x * w}, ${points[points.length-1].y * h})`);
         }
         
-        // Convert NAPLPS color to p5.js color
-        let color = 0; // default black
-        if (this.col) {
-            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
-                // RGB color from NAPLPS
-                color = p.color(this.col.x, this.col.y, this.col.z);
-                console.log(`[TelidonDrawCmd] Using RGB color: (${this.col.x}, ${this.col.y}, ${this.col.z})`);
-            } else if (typeof this.col === 'number') {
-                // Grayscale value
-                color = this.col;
-                console.log(`[TelidonDrawCmd] Using grayscale color: ${this.col}`);
-            }
-        } else {
-            console.log(`[TelidonDrawCmd] No color set, using black`);
-        }
+        // Use the color that was set by setColor method
+        let color = this.col || 0; // default black if no color set
+        console.log(`[TelidonDrawCmd] Using color for polygon:`, color);
         
         if (isFill) {
             // For filled shapes, set fill and no stroke
             if (p && typeof p.fill === 'function') {
                 p.fill(color);
+                console.log(`[TelidonDrawCmd] fill() called with color:`, color);
             }
             if (p && typeof p.noStroke === 'function') {
                 p.noStroke();
+                console.log(`[TelidonDrawCmd] noStroke() called`);
             }
         } else {
             // For outlined shapes, set stroke and no fill
             if (p && typeof p.noFill === 'function') {
                 p.noFill();
+                console.log(`[TelidonDrawCmd] noFill() called`);
             }
             if (p && typeof p.stroke === 'function') {
                 p.stroke(color);
+                console.log(`[TelidonDrawCmd] stroke() called with color:`, color);
             }
             if (p && typeof p.strokeWeight === 'function') {
                 p.strokeWeight(1);
+                console.log(`[TelidonDrawCmd] strokeWeight(1) called`);
             }
         }
         
