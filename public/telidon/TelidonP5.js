@@ -23,6 +23,64 @@ const NAPLPS_PALETTE = [
     { r: 5120, g: 0,    b: 7168 }   // Purple
 ];
 
+// nsrc1469's HSB color conversion system
+const NAPLPS_HUE_TABLE = 
+    { g: 0, r: 0, b: 7 }, { g: 0, r: 1, b: 7 }, { g: 0, r: 2, b: 7 }, { g: 0, r: 3, b: 7 },
+    { g: 0, r: 4, b: 7 }, { g: 0, r: 5, b: 7 }, { g: 0, r: 6, b: 7 }, { g: 0, r: 7, b: 7 },
+    { g: 0, r: 7, b: 6 }, { g: 0, r: 7, b: 5 }, { g: 0, r: 7, b: 4 }, { g: 0, r: 7, b: 3 },
+    { g: 0, r: 7, b: 2 }, { g: 0, r: 7, b: 1 }, { g: 0, r: 7, b: 0 }, { g: 1, r: 7, b: 0 },
+    { g: 2, r: 7, b: 0 }, { g: 3, r: 7, b: 0 }, { g: 4, r: 7, b: 0 }, { g: 5, r: 7, b: 0 },
+    { g: 6, r: 7, b: 0 }, { g: 7, r: 7, b: 0 }, { g: 7, r: 6, b: 0 }, { g: 7, r: 5, b: 0 },
+    { g: 7, r: 4, b: 0 }, { g: 7, r: 3, b: 0 }, { g: 7, r: 2, b: 0 }, { g: 7, r: 1, b: 0 },
+    { g: 7, r: 0, b: 0 }, { g: 7, r: 0, b: 1 }, { g: 7, r: 0, b: 2 }, { g: 7, r: 0, b: 3 },
+    { g: 7, r: 0, b: 4 }, { g: 7, r: 0, b: 5 }, { g: 7, r: 0, b: 6 }, { g: 7, r: 0, b: 7 },
+    { g: 6, r: 0, b: 7 }, { g: 5, r: 0, b: 7 }, { g: 4, r: 0, b: 7 }, { g: 3, r: 0, b: 7 },
+    { g: 2, r: 0, b: 7 }, { g: 1, r: 0, b: 7 }
+];
+
+// nsrc1469's HSB to RGB conversion
+function hsb2rgb(h, s, b) {
+    const hue = NAPLPS_HUE_TABLE[h % 42];
+    const sat = Math.max(0, Math.min(7, s));
+    const bright = Math.max(0, Math.min(7, b));
+    
+    const g = ((7 * sat + (hue.g * sat + 4) / 7) * bright + 4) / 7 * 2;
+    const r = ((7 * sat + (hue.r * sat + 4) / 7) * bright + 4) / 7 * 2;
+    const b_val = ((7 * sat + (hue.b * sat + 4) / 7) * bright + 4) / 7 * 2;
+    
+    return { r: r * 1024, g: g * 1024, b: b_val * 1024 };
+}
+
+// nsrc1469's RGB to HSB conversion
+function rgb2hsb(r, g, b) {
+    r = Math.floor(r / 124);
+    g = Math.floor(g / 124);
+    b = Math.floor(b / 1024);
+    const max_val = Math.max(g, Math.max(r, b));
+    if (!max_val) return { h: 0, s: 0, b: 0 };
+    
+    const norm_g = (g * 7) / max_val;
+    const norm_r = (r * 7) / max_val;
+    const norm_b = (b * 7) / max_val;
+    
+    const sat = 7 - Math.min(norm_g, Math.min(norm_r, norm_b));
+    if (!sat) return { h: 0, s: 0, b: max_val };
+    
+    const adj_g = ((norm_g - 7 + sat) * 7 + sat / 2) / sat;
+    const adj_r = ((norm_r - 7 + sat) * 7 + sat / 2) / sat;
+    const adj_b = ((norm_b - 7 + sat) * 7 + sat / 2) / sat;
+    
+    let hue = 0;
+    for (let i = 0; i < 42; i++) {
+        if (NAPLPS_HUE_TABLE[i].g === adj_g && NAPLPS_HUE_TABLE[i].r === adj_r && NAPLPS_HUE_TABLE[i].b === adj_b) {
+            hue = i;
+            break;
+        }
+    }
+    
+    return { h: hue, s: sat, b: max_val };
+}
+
 // Global debug state
 window.NAPLPS_DEBUG = {
     totalCommands: 0,
@@ -649,20 +707,20 @@ class TelidonDrawCmd {
         if (this.p && typeof this.p.color === 'function') {
             // Handle Vector3 object from naplps.js
             if (v && typeof v.x !== 'undefined' && typeof v.y !== 'undefined' && typeof v.z !== 'undefined') {
+                // nsrc1469s color handling: Use RGB values directly
                 this.col = this.p.color(v.x, v.y, v.z);
-                console.log(`[TelidonDrawCmd] Created p5 color from Vector3: ${this.col} (R:${v.x}, G:${v.y}, B:${v.z})`);
+                console.log(`[TelidonDrawCmd] Created p5 color from Vector3 ${this.col} (R:${v.x}, G:${v.y}, B:${v.z})`);
             } else if (typeof v === 'number') {
-                // Handle color index - convert to RGB using palette
-                let paletteIndex = v;
-                if (paletteIndex < 0 || paletteIndex >= NAPLPS_PALETTE.length) paletteIndex = 0;
-                const rgb = NAPLPS_PALETTE[paletteIndex];
-                this.col = this.p.color(rgb.r, rgb.g, rgb.b);
-                console.log(`[TelidonDrawCmd] Created p5 color from palette index: ${paletteIndex} (R:${rgb.r}, G:${rgb.g}, B:${rgb.b})`);
+                // nsrc1469s palette lookup: Treat as color index
+                const colorIndex = Math.floor(v) % NAPLPS_PALETTE.length;
+                const paletteColor = NAPLPS_PALETTE[colorIndex];
+                this.col = this.p.color(paletteColor.r, paletteColor.g, paletteColor.b);
+                console.log(`[TelidonDrawCmd] Created p5 color from palette index ${colorIndex}: ${this.col} (R:${paletteColor.r}, G:${paletteColor.g}, B:${paletteColor.b})`);
             } else {
                 console.log(`[TelidonDrawCmd] Invalid color object: ${JSON.stringify(v)}`);
             }
         } else {
-            console.log(`[TelidonDrawCmd] p5 not available or color function not found`);
+            console.log(`TelidonDrawCmd] p5available or color function not found`);
         }
     }
 
@@ -718,90 +776,95 @@ class TelidonDrawCmd {
     }
 
     drawArc(points, w, h, isFill) { // PVector, w, h
-        const p = this.p;
-        debugLog('TelidonDrawCmd', 'drawArc called', { 
-            points: points.length, 
-            isFill: isFill, 
-            canvasSize: { width: w, height: h },
-            p5Available: !!p 
-        });
-        
-        if (points.length > 0) {
-            debugLog('TelidonDrawCmd', 'Arc points', {
-                firstPoint: points[0],
-                lastPoint: points[points.length - 1],
-                allPoints: points.slice(0, 3) // Show first 3 points
-            });
+        if (!this.p || points.length < 2) {
+            console.log(`[TelidonDrawCmd] drawArc: Invalid points or p5 not available`);
+            return;
         }
-        
-        // Convert NAPLPS color to p5.js color
-        let color = 0; // default black
-        if (this.col) {
-            if (this.col.x !== undefined && this.col.y !== undefined && this.col.z !== undefined) {
-                // RGB color from NAPLPS
-                color = p.color(this.col.x, this.col.y, this.col.z);
-            } else if (typeof this.col === 'number') {
-                // Grayscale value
-                color = this.col;
-            }
+
+        // nsrc1469 drawing algorithm
+        console.log(`[TelidonDrawCmd] drawArc: ${points.length} points, fill: ${isFill}`);
+
+        if (points.length === 2) { // nsrc1469proach: Two points - draw as line
+            this.drawLines(points, w, h);
+            return;
         }
-        
-        if (isFill) {
-            // For filled shapes, set fill and no stroke
-            if (p && typeof p.fill === 'function') {
-                p.fill(color);
-                debugLog('TelidonDrawCmd', 'Set fill for arc');
-            }
-            if (p && typeof p.noStroke === 'function') {
-                p.noStroke();
-                debugLog('TelidonDrawCmd', 'Set noStroke for arc');
-            }
-        } else {
-            // For outlined shapes, set stroke and no fill
-            if (p && typeof p.noFill === 'function') {
-                p.noFill();
-                debugLog('TelidonDrawCmd', 'Set noFill for arc');
-            }
-            if (p && typeof p.stroke === 'function') {
-                p.stroke(color);
-                debugLog('TelidonDrawCmd', 'Set stroke for arc');
-            }
-            if (p && typeof p.strokeWeight === 'function') {
-                p.strokeWeight(1);
-                debugLog('TelidonDrawCmd', 'Set strokeWeight for arc');
-            }
-        }
-        
-        if (points.length == 2) {
-            let x1 = points[0].x * w;
-            let y1 = points[0].y * h;
-            let x2 = points[1].x * w;
-            let y2 = points[1].y * h;
+
+        if (points.length === 3) { // nsrc1469ic arc calculation
+            const p0 = points[0];
+            const p1 = points[1];
+            const p2 = points[2];
+            // Convert to canvas coordinates
+            const x0 = p0.x * w;
+            const y0 = p0.y * h;
+            const x1 = p1.x * w;
+            const y1 = p1.y * h;
+            const x2 = p2.x * w;
+            const y2 = p2.y * h;
             
-            debugLog('TelidonDrawCmd', 'Drawing arc with 2 points', {
-                canvasCoords: { x1, y1, x2, y2 },
-                dimensions: { width: x2-x1, height: y2-y1 }
-            });
+            // nsrc1469's center calculation
+            const dx1 = x0 - x2;
+            const dy1 = y0 - y2;
+            const dx2 = x1 - x2;
+            const dy2 = y1 - y2;
             
-            if (p && typeof p.ellipseMode === 'function') p.ellipseMode(p.CORNER);
-            if (p && typeof p.ellipse === 'function') {
-                p.ellipse(x1, y1, x2-x1, x2-x1);
-                debugLog('TelidonDrawCmd', 'Arc drawn as ellipse');
-                window.NAPLPS_DEBUG.shapesDrawn++;
+            const det = 2 * (dx1 * dy2 - dx2 * dy1);
+            let centerX, centerY;
+            
+            if (Math.abs(det) < 0.001) { // Degenerate case - draw as line
+                this.drawLines(points, w, h);
+                return;
             }
-        } else {
-            debugLog('TelidonDrawCmd', 'Drawing arc with multiple points', { pointCount: points.length });
-            for (let i=0; i<points.length-1; i++) {
-                let x1 = points[i].x * w;
-                let y1 = points[i].y * h;
-                let x2 = points[i+1].x * w;
-                let y2 = points[i+1].y * h;
-                if (p && typeof p.arc === 'function') {
-                    p.arc(x1, y1, x2-x1, y2-y1, i * (PI/points.length), (i+1) * (PI/points.length));
-                    debugLog('TelidonDrawCmd', 'Arc segment drawn', { segment: i, coords: { x1, y1, x2, y2 } });
+            
+            // nsrc1469's center calculation formula
+            centerX = (dy2 * (dx1*dx1 + dy1*dy1) - dy1 * (dx2*dx2 + dy2*dy2)) / det;
+            centerY = (dx1 * (dx2*dx2 + dy2*dy2) - dx2 * (dx1*dx1 + dy1*dy1)) / det;
+            
+            centerX += x2;
+            centerY += y2;
+            
+            // Calculate radius
+            const radius = Math.sqrt((centerX - x0) * (centerX - x0) + (centerY - y0) * (centerY - y0));
+            // nsrc1469's angle calculation
+            const angle1 = Math.atan2(y0 - centerY, x0 - centerX);
+            const angle2 = Math.atan2(y2 - centerY, x2 - centerX);
+            
+            // Determine arc direction
+            let startAngle = angle1;
+            let endAngle = angle2;
+            
+            // nsrc1469rc direction logic
+            const angleDiff = endAngle - startAngle;
+            if (angleDiff > Math.PI) {
+                endAngle -= 2 * Math.PI;
+            } else if (angleDiff < -Math.PI) {
+                endAngle += 2 * Math.PI;
+            }
+            
+            // Draw the arc
+            if (this.col) {
+                if (isFill) {
+                    this.p.fill(this.col);
+                    this.p.noStroke();
+                } else {
+                    this.p.stroke(this.col);
+                    this.p.noFill();
+                }
+            } else {
+                if (isFill) {
+                    this.p.fill(255);
+                    this.p.noStroke();
+                } else {
+                    this.p.stroke(255);
+                    this.p.noFill();
                 }
             }
-            window.NAPLPS_DEBUG.shapesDrawn++;
+            
+            // nsrc1469rawing
+            this.p.arc(centerX, centerY, radius * 2, radius * 2, startAngle, endAngle);
+            
+        } else {
+            // Multiple points - draw as polyline
+            this.drawLines(points, w, h);
         }
     }
 
