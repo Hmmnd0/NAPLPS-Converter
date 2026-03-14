@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
-import { NAPLPSPrimitive, NAPLPSPoint, NAPLPSColor } from '@/lib/naplps';
+import { NAPLPSPrimitive } from '@/lib/naplps';
 
 interface NAPLPSViewerProps {
   primitives: NAPLPSPrimitive[];

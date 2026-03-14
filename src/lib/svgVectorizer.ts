@@ -6,13 +6,13 @@
  */
 export async function rasterToSVG(
   dataUrl: string,
-  options: any = {}
+  options: Record<string, unknown> = {}
 ): Promise<string> {
   if (typeof window === 'undefined') {
     throw new Error('ImageTracerJS can only be used in the browser.');
   }
   const ImageTracer = (await import('imagetracerjs')).default;
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     ImageTracer.imageToSVG(
       dataUrl,
       (svgString: string) => resolve(svgString),

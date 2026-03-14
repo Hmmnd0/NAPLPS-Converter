@@ -39,9 +39,8 @@ export class ImageProcessor {
 
   private detectPrimitives(): NAPLPSPrimitive[] {
     if (!this.imageData) return [];
-    
+
     const primitives: NAPLPSPrimitive[] = [];
-    const { width, height, data } = this.imageData;
     
     // Detect edges and contours
     const edges = this.detectEdges();
@@ -99,11 +98,6 @@ export class ImageProcessor {
     // Sobel edge detection
     for (let y = 1; y < height - 1; y++) {
       for (let x = 1; x < width - 1; x++) {
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        
         // Calculate gradient
         const gx = this.calculateGradientX(x, y, width, data);
         const gy = this.calculateGradientY(x, y, width, data);

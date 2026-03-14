@@ -21,15 +21,6 @@ export interface NAPLPSPrimitive {
   radius?: number; // for circles
 }
 
-// Telidon/NAPLPS Control Characters
-const NAPLPS_CONTROLS = {
-  CANCEL: 0x18,  // Cancel
-  ESC: 0x1B,     // Escape
-  NSR: 0x1F,     // Non-Selective Reset
-  SO: 0x0E,      // Shift Out - Graphics mode
-  SI: 0x0F,      // Shift In - Text mode
-} as const;
-
 // Telidon/NAPLPS Graphics Primitives (matching TelidonP5.js)
 const NAPLPS_PRIMITIVES = {
   RESET: 0x20,           // Reset
@@ -187,7 +178,7 @@ export class NAPLPSEncoder {
   }
 
   // Add a rectangle primitive (Telidon format)
-  addRectangle(topLeft: NAPLPSPoint, bottomRight: NAPLPSPoint, color?: NAPLPSColor, fillColor?: NAPLPSColor, paletteIndex?: number): void {
+  addRectangle(topLeft: NAPLPSPoint, bottomRight: NAPLPSPoint, color?: NAPLPSColor): void {
     const beforeLen = this.data.length;
     
     // Set color if provided
@@ -529,20 +520,6 @@ export function createNAPLPSFromImage(
   return primitives;
 }
 
-function getNeighbors(x: number, y: number, width: number, height: number): [number, number][] {
-  const neighbors: [number, number][] = [];
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-        neighbors.push([nx, ny]);
-      }
-    }
-  }
-  return neighbors;
-} 
 
 // Test function to generate a NAPLPS file with a text primitive (original encoder)
 export function generateTextPrimitiveNaplpsOriginal(): string {

@@ -1,8 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 "use client";
 
 import React, { useRef, useState, useEffect } from 'react';
 
-// Type declarations for TelidonP5.js
+// Type declarations for TelidonP5.js (dynamic scripts loaded from /public/telidon/)
 declare global {
   interface Window {
     TelidonP5: any;
