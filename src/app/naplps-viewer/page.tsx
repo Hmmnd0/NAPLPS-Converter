@@ -45,11 +45,9 @@ export default function NaplpsViewer() {
       
       // Wait for TelidonP5 to be loaded
       const tryRender = () => {
-        // @ts-ignore
         if (window.TelidonP5 && window.p5) {
           console.log("TelidonP5 and p5 loaded, calling renderBinary...");
           try {
-            // @ts-ignore
             window.TelidonP5.renderBinary(
               new Uint8Array(arrayBuffer as ArrayBuffer),
               canvasRef.current

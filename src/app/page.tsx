@@ -2,20 +2,15 @@
 
 import React, { useState } from 'react';
 import FileUpload from '@/components/FileUpload';
-import NAPLPSViewer from '@/components/NAPLPSViewer';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
-import { NAPLPSEncoder, generateMinimalFilledRectangleNaplps } from '@/lib/naplps';
-import { ImageProcessor, ProcessedImage } from '@/lib/imageProcessor';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
 import { svgToNaplps, svgToNaplpsFoxtoolbox, getConversionStats } from '@/lib/svgToNaplps';
-// Removed: import { rasterToSVG } from '@/lib/svgVectorizer';
 
 export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [originalPreview, setOriginalPreview] = useState<string | null>(null);
   const [svgString, setSvgString] = useState<string | null>(null);
   const [svgReady, setSvgReady] = useState<boolean>(false);
-  const [processedImage, setProcessedImage] = useState<ProcessedImage | null>(null);
   const [naplpsData, setNaplpsData] = useState<string>('');
   const [conversionStats, setConversionStats] = useState<{
     totalPixels: number;
@@ -33,7 +28,6 @@ export default function Home() {
     setIsProcessing(true);
     setProcessingProgress(0);
     setError('');
-    setProcessedImage(null);
     setNaplpsData('');
     setSvgString(null);
     setOriginalPreview(null);
@@ -56,7 +50,7 @@ export default function Home() {
           const svgPromise = pixelPngToSvg(dataUrl, (progress) => {
             setProcessingProgress(progress);
           });
-          const result = await Promise.race([svgPromise, timeoutPromise]) as { svg: string, palette: any };
+          const result = await Promise.race([svgPromise, timeoutPromise]) as { svg: string, palette: Array<{r:number,g:number,b:number}> };
           setSvgString(result.svg);
           setSvgReady(true);
         } catch (svgErr) {

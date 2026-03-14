@@ -40,33 +40,25 @@ function parseSvgToPixels(svgString: string): Rectangle[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgString, 'image/svg+xml');
   const rects = doc.querySelectorAll('rect');
-  
+
   console.log(`Parsing ${rects.length} pixels from SVG...`);
-  
-  // Create a 2D grid for efficient rectangle finding
+
   const pixels: Pixel[] = [];
-  const pixelGrid = new Map<string, boolean>(); // key: "x,y", value: exists
-  
   rects.forEach(rect => {
     const x = parseInt(rect.getAttribute('x') || '0');
     const y = parseInt(rect.getAttribute('y') || '0');
     const color = rect.getAttribute('fill') || '#000000';
-    
     pixels.push({ x, y, color });
-    pixelGrid.set(`${x},${y}`, true);
   });
-  
-  console.log(`Created pixel grid with ${pixelGrid.size} pixels`);
-  
+
   // Group adjacent pixels of the same color into rectangles
-  return groupPixelsIntoRectangles(pixels, pixelGrid);
+  return groupPixelsIntoRectangles(pixels);
 }
 
 // Group adjacent pixels into optimal rectangles
-function groupPixelsIntoRectangles(pixels: Pixel[], pixelGrid: Map<string, boolean>): Rectangle[] {
+function groupPixelsIntoRectangles(pixels: Pixel[]): Rectangle[] {
   const rectangles: Rectangle[] = [];
-  const visited = new Set<string>();
-  
+
   // Sort pixels by color for efficient grouping
   const pixelsByColor = new Map<string, Pixel[]>();
   pixels.forEach(pixel => {
@@ -75,69 +67,71 @@ function groupPixelsIntoRectangles(pixels: Pixel[], pixelGrid: Map<string, boole
     }
     pixelsByColor.get(pixel.color)!.push(pixel);
   });
-  
+
   console.log(`Grouping pixels by ${pixelsByColor.size} colors...`);
-  
-  // For each color, find optimal rectangles
-  for (const [color, colorPixels] of pixelsByColor) {
+
+  // For each color, find optimal rectangles using a per-color grid
+  for (const [, colorPixels] of pixelsByColor) {
     const colorVisited = new Set<string>();
-    
+    // Build a grid containing only pixels of this color
+    const colorGrid = new Map<string, boolean>();
+    for (const p of colorPixels) {
+      colorGrid.set(`${p.x},${p.y}`, true);
+    }
+
     for (const pixel of colorPixels) {
       const key = `${pixel.x},${pixel.y}`;
       if (colorVisited.has(key)) continue;
-      
+
       // Find the largest possible rectangle starting from this pixel
-      const rect = findLargestRectangleOptimized(pixel, colorPixels, colorVisited, pixelGrid);
+      const rect = findLargestRectangleOptimized(pixel, colorVisited, colorGrid);
       rectangles.push(rect);
     }
   }
-  
+
   console.log(`Created ${rectangles.length} rectangles`);
   return rectangles;
 }
 
-// Optimized rectangle finding using grid lookup
+// Optimized rectangle finding using a per-color grid lookup
 function findLargestRectangleOptimized(
-  startPixel: Pixel, 
-  colorPixels: Pixel[], 
+  startPixel: Pixel,
   visited: Set<string>,
-  pixelGrid: Map<string, boolean>
+  colorGrid: Map<string, boolean>
 ): Rectangle {
   const color = startPixel.color;
-  
-  // Find maximum width using grid lookup
+
+  // Find maximum width (only unvisited pixels of the same color)
   let maxWidth = 1;
   for (let w = 1; ; w++) {
     const key = `${startPixel.x + w},${startPixel.y}`;
-    if (!pixelGrid.has(key)) break;
+    if (!colorGrid.has(key) || visited.has(key)) break;
     maxWidth = w + 1;
   }
-  
-  // Find optimal rectangle using grid lookup
+
+  // Find optimal rectangle
   let bestArea = 1;
   let bestWidth = 1;
   let bestHeight = 1;
-  
+
   for (let width = 1; width <= maxWidth; width++) {
     let height = 1;
-    
-    // Check if we can extend height
+
     while (true) {
       let canExtend = true;
-      
-      // Check if all pixels in the row exist using grid lookup
+
       for (let x = 0; x < width; x++) {
         const key = `${startPixel.x + x},${startPixel.y + height}`;
-        if (!pixelGrid.has(key)) {
+        if (!colorGrid.has(key) || visited.has(key)) {
           canExtend = false;
           break;
         }
       }
-      
+
       if (!canExtend) break;
       height++;
     }
-    
+
     const area = width * height;
     if (area > bestArea) {
       bestArea = area;
@@ -145,20 +139,20 @@ function findLargestRectangleOptimized(
       bestHeight = height;
     }
   }
-  
+
   // Mark all pixels in the rectangle as visited
   for (let y = 0; y < bestHeight; y++) {
     for (let x = 0; x < bestWidth; x++) {
       visited.add(`${startPixel.x + x},${startPixel.y + y}`);
     }
   }
-  
+
   return {
     x: startPixel.x,
     y: startPixel.y,
     width: bestWidth,
     height: bestHeight,
-    color: color
+    color
   };
 }
 
@@ -246,7 +240,7 @@ function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
   for (let i = 0; i < rectangles.length; i++) {
     if (merged.has(i)) continue;
     
-    let current = rectangles[i];
+    const current = rectangles[i];
     let mergedCount = 0;
     
     // Try to merge with other rectangles of the same color
@@ -301,15 +295,11 @@ function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
 // Coordinate scaling to ensure coordinates fit within NAPLPS range
 function scaleCoordinates(rectangles: Rectangle[], maxWidth: number, maxHeight: number): Rectangle[] {
   console.log(`Scaling coordinates for image ${maxWidth}x${maxHeight}`);
-  
-  // Use separate scaling factors for X and Y to better utilize the coordinate space
+
   const scaleFactorX = 63 / maxWidth;
   const scaleFactorY = 63 / maxHeight;
-  
-  console.log(`Using scale factors: X=${scaleFactorX}, Y=${scaleFactorY} (dimensions: ${maxWidth}x${maxHeight})`);
-  
+
   return rectangles.map(rect => {
-    // Scale coordinates using separate X and Y factors to better utilize coordinate space
     const scaledRect = {
       ...rect,
       x: Math.round(rect.x * scaleFactorX),
@@ -317,44 +307,19 @@ function scaleCoordinates(rectangles: Rectangle[], maxWidth: number, maxHeight: 
       width: Math.max(1, Math.round(rect.width * scaleFactorX)),
       height: Math.max(1, Math.round(rect.height * scaleFactorY))
     };
-    
+
     // Clamp coordinates to 0-63 range
     scaledRect.x = Math.max(0, Math.min(63, scaledRect.x));
     scaledRect.y = Math.max(0, Math.min(63, scaledRect.y));
     scaledRect.width = Math.max(1, Math.min(63 - scaledRect.x, scaledRect.width));
     scaledRect.height = Math.max(1, Math.min(63 - scaledRect.y, scaledRect.height));
-    
-    // Debug first few rectangles
-    if (rectangles.indexOf(rect) < 3) {
-      console.log(`Rectangle ${rectangles.indexOf(rect)}: ${rect.x},${rect.y} ${rect.width}x${rect.height} -> ${scaledRect.x},${scaledRect.y} ${scaledRect.width}x${scaledRect.height}`);
-    }
-    
-    // Debug all rectangles to see if any are large enough to be visible
-    if (scaledRect.width <= 1 && scaledRect.height <= 1) {
-      console.log(`[WARNING] Rectangle ${rectangles.indexOf(rect)} is very small: ${scaledRect.width}x${scaledRect.height}`);
-    }
-    
-    // Debug rectangle positions to see if they're all overlapping
-    console.log(`[DEBUG] Rectangle ${rectangles.indexOf(rect)}: pos(${scaledRect.x},${scaledRect.y}) size(${scaledRect.width}x${scaledRect.height})`);
-    
-    // Check if this rectangle is significantly different from the previous one
-    if (rectangles.indexOf(rect) > 0) {
-      const prevRect = rectangles[rectangles.indexOf(rect) - 1];
-      const xDiff = Math.abs(scaledRect.x - prevRect.x);
-      const yDiff = Math.abs(scaledRect.y - prevRect.y);
-      const sizeDiff = Math.abs(scaledRect.width - prevRect.width) + Math.abs(scaledRect.height - prevRect.height);
-      
-      if (xDiff < 2 && yDiff < 2 && sizeDiff < 2) {
-        console.log(`[WARNING] Rectangle ${rectangles.indexOf(rect)} is very similar to previous: xDiff=${xDiff}, yDiff=${yDiff}, sizeDiff=${sizeDiff}`);
-      }
-    }
-    
+
     return scaledRect;
   });
 }
 
 // Accept palette as argument
-export async function svgToNaplps(svgString: string, width: number, height: number, palette?: Array<{r:number,g:number,b:number}>): Promise<string> {
+export async function svgToNaplps(svgString: string, width: number, height: number): Promise<string> {
   try {
     console.log('Starting SVG to NAPLPS conversion...');
     let rectangles = parseSvgToPixels(svgString);
@@ -377,23 +342,14 @@ export async function svgToNaplps(svgString: string, width: number, height: numb
     // Convert rectangles to NAPLPS primitives with improved color quantization
     for (const rect of rectangles) {
       const originalColor = parseColor(rect.color);
-      
-      // Quantize color to Telidon palette
       const quantizedColor = quantizeColor(originalColor);
-      
-      // Debug first few colors
-      if (rectangles.indexOf(rect) < 3) {
-        console.log(`Rectangle ${rectangles.indexOf(rect)} color: ${rect.color} -> RGB(${originalColor.r},${originalColor.g},${originalColor.b}) -> RGB(${quantizedColor.r},${quantizedColor.g},${quantizedColor.b})`);
-      }
-      
-      // Convert to NAPLPS coordinates
+
       const topLeft: NAPLPSPoint = { x: rect.x, y: rect.y };
-      const bottomRight: NAPLPSPoint = { 
-        x: rect.x + rect.width - 1, 
-        y: rect.y + rect.height - 1 
+      const bottomRight: NAPLPSPoint = {
+        x: rect.x + rect.width - 1,
+        y: rect.y + rect.height - 1
       };
-      
-      // Set quantized color and draw rectangle
+
       encoder.setColor(quantizedColor);
       encoder.addRectangle(topLeft, bottomRight);
     }
@@ -427,27 +383,13 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
     // Convert rectangles to NAPLPS primitives using Foxtoolbox approach
     for (const rect of rectangles) {
       const originalColor = parseColor(rect.color);
-      
-      // Quantize color to Telidon palette
       const quantizedColor = quantizeColor(originalColor);
-      
-      // Debug first few colors
-      if (rectangles.indexOf(rect) < 3) {
-        console.log(`Rectangle ${rectangles.indexOf(rect)} color: ${rect.color} -> RGB(${originalColor.r},${originalColor.g},${originalColor.b}) -> RGB(${quantizedColor.r},${quantizedColor.g},${quantizedColor.b})`);
-      }
-      
-      // Convert to fractional coordinates (0.0-1.0)
+
       const topLeftX = rect.x / width;
       const topLeftY = rect.y / height;
       const bottomRightX = (rect.x + rect.width) / width;
       const bottomRightY = (rect.y + rect.height) / height;
-      
-      // Debug first few coordinates
-      if (rectangles.indexOf(rect) < 3) {
-        console.log(`Rectangle ${rectangles.indexOf(rect)} coordinates: (${topLeftX.toFixed(3)},${topLeftY.toFixed(3)}) to (${bottomRightX.toFixed(3)},${bottomRightY.toFixed(3)})`);
-      }
-      
-      // Set quantized color and draw rectangle
+
       encoder.setColor(quantizedColor);
       encoder.addFilledRectangle(
         { x: topLeftX, y: topLeftY },
@@ -506,8 +448,7 @@ export function generateMinimalNaplps(): string {
   console.log('[DEBUG] Drawing white rectangle using palette index 15...');
   encoder.addRectangle(
     { x: 10, y: 10 },
-    { x: 53, y: 53 },
-    undefined, undefined, 15
+    { x: 53, y: 53 }
   );
   
   // Debug: log first 32 bytes of binary file

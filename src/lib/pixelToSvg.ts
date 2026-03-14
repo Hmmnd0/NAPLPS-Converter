@@ -73,7 +73,7 @@ export async function pixelPngToSvg(
       console.log('Got image data, starting pixel processing...');
       
       // Quantize to 16-color palette
-      let palette = medianCutQuantize(imageData, 16);
+      const palette = medianCutQuantize(imageData, 16);
       // Patch: Ensure pure red (or near-red) is in the palette if present in the image
       const colors = [];
       for (let i = 0; i < imageData.data.length; i += 4) {
