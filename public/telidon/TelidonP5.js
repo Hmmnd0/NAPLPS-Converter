@@ -297,32 +297,20 @@ class TelidonDrawCmd {
             console.log('[TelidonDrawCmd] Found points in command:', this.cmd.points.length);
             console.log('[TelidonDrawCmd] First few points from naplps.js:', this.cmd.points.slice(0, 3));
             
-            // RHINO-style coordinate system
-            const ONE = 8192; // base coordinate system
-            const zoom = 2; // RHINO's default zoom - reduced from 4 to make shapes larger
-            const xpos = 64; // RHINO's default left x pos
-            const ypos = 399; // RHINOs default under y pos
-            
-            // RHINO's scaling functions
-            const SCALE = (d) => ((d) >> zoom);
-            const X_SCALE = (d) => (xpos + (SCALE(d)));
-            const Y_SCALE = (d) => (ypos - (SCALE(d)));
-            
+            // Normalize 12-bit NAPLPS coordinates (0-4095) directly to canvas space (0-1).
+            // The previous RHINO-style transform (64 + rawX/4) / 800 mapped values > ~2944 off-screen,
+            // causing most of a full-image SVG→NAP conversion to be invisible.
+            const COORD_MAX = 4095;
+
             this.points = this.cmd.points.map(p => {
-                // Use RHINO's coordinate approach
                 const rawX = p[0];
                 const rawY = p[1];
-                
-                // Apply RHINO scaling
-                const scaledX = X_SCALE(rawX);
-                const scaledY = Y_SCALE(rawY);
-                
-                // Convert to canvas coordinates (0-1 range)
-                const canvasX = scaledX /800; // Assuming 800x600 canvas
-                const canvasY = scaledY /600; // Assuming 800x600 canvas // Assuming 600
-                
-                console.log(`[TelidonDrawCmd] RHINO conversion: raw(${rawX}, ${rawY}) -> scaled(${scaledX}, ${scaledY}) -> canvas(${canvasX}, ${canvasY})`);
-                
+
+                const canvasX = rawX / COORD_MAX;
+                const canvasY = rawY / COORD_MAX;
+
+                console.log(`[TelidonDrawCmd] coord: raw(${rawX}, ${rawY}) -> canvas(${canvasX.toFixed(3)}, ${canvasY.toFixed(3)})`);
+
                 return {
                     x: canvasX,
                     y: canvasY
@@ -1009,6 +997,7 @@ if (typeof window !== 'undefined') {
     // Add TelidonP5.renderBinary for viewer compatibility
     console.log('[TelidonP5.js] Creating window.TelidonP5...');
     window.TelidonP5 = {
+        _p5Instance: null,
         renderBinary: function(bytes, container) {
             debugLog('renderBinary', 'Function called', {
                 bytesLength: bytes.length,
@@ -1038,14 +1027,18 @@ if (typeof window !== 'undefined') {
                 }
             };
             
-            // Remove any previous canvas
+            // Remove previous p5 instance and canvas
+            if (this._p5Instance) {
+                try { this._p5Instance.remove(); } catch(e) {}
+                this._p5Instance = null;
+            }
             if (container) {
                 container.innerHTML = '';
                 debugLog('renderBinary', 'Cleared container');
             }
-            
+
             // Create a p5 sketch
-            new window.p5(function(p) {
+            this._p5Instance = new window.p5(function(p) {
                 let telidonDraw;
                 
                 p.setup = function() {
@@ -1063,9 +1056,13 @@ if (typeof window !== 'undefined') {
                     try {
                         // Check if all required dependencies are available
                         if (typeof window.NapDecoder === 'undefined') {
-                            const error = 'NapDecoder not available!';
+                            const error = 'NapDecoder not available! Check that naplps.js loaded correctly.';
                             console.error('[renderBinary]', error);
                             window.NAPLPS_DEBUG.errors.push(error);
+                            p.noLoop();
+                            if (container) {
+                                container.innerHTML = `<div style="color:#c00;padding:1em;font-family:monospace;font-size:13px">${error}</div>`;
+                            }
                             return;
                         }
                         
@@ -1076,7 +1073,11 @@ if (typeof window !== 'undefined') {
                         });
                         
                         // Convert Uint8Array to string for NapDecoder
-                        const naplpsString = String.fromCharCode(...bytes);
+                        // Note: spread operator (...bytes) crashes for large files; use a loop instead
+                        let naplpsString = '';
+                        for (let i = 0; i < bytes.length; i++) {
+                            naplpsString += String.fromCharCode(bytes[i]);
+                        }
                         debugLog('renderBinary', 'NAPLPS string created', {
                             originalBytes: bytes.length,
                             stringLength: naplpsString.length,
@@ -1093,10 +1094,13 @@ if (typeof window !== 'undefined') {
                         window.NAPLPS_DEBUG.canvasSize = { width: 400, height: 400 };
                         
                     } catch (error) {
-                        const errorMsg = `Error creating TelidonDraw: ${error.message}`;
-                        console.error('[renderBinary]', errorMsg);
+                        const errorMsg = `Error rendering NAPLPS: ${error.message}`;
+                        console.error('[renderBinary]', errorMsg, error.stack);
                         window.NAPLPS_DEBUG.errors.push(errorMsg);
-                        debugLog('renderBinary', 'Error in setup', { error: error.message, stack: error.stack });
+                        p.noLoop();
+                        if (container) {
+                            container.innerHTML = `<div style="color:#c00;padding:1em;font-family:monospace;font-size:13px;white-space:pre-wrap">${errorMsg}</div>`;
+                        }
                     }
                 };
                 

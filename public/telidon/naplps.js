@@ -363,7 +363,7 @@ let naplps_backgroundColor = naplps_black;
 let naplps_drawBackground = true;
 let naplps_singleValLength = 1;
 let naplps_multiValLength = 3;
-let naplps_minVal = 40; // 64
+let naplps_minVal = 64; // 0x40 - NAPLPS data bytes start at 0x40
 let naplps_is3D = false;
 
 // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~

@@ -56,33 +56,29 @@ export class NAPLPSFoxtoolboxEncoder {
     this.data.push(0x40); // Domain data
   }
 
-  // Set color using Telidon ASCII-safe palette
+  // Set color using NAPLPS GRB interleaved bit-packing (per NAP.txt spec).
+  // The decoder (naplps.js setColor) reads each data byte as GRBGRB at bits 5-0:
+  //   bit5=G, bit4=R, bit3=B, bit2=G, bit1=R, bit0=B  (2 bits per component per byte)
+  // We send 4 bytes (matching DOMAIN 0x4D which sets 4-byte multi-value mode).
+  // Byte i carries bits (7-2i) and (6-2i) of each 8-bit component, MSB first.
   setColor(color: NAPLPSColor): void {
     this.currentColor = color;
     this.data.push(0x3C); // SET_COLOR
-    
-    // Map to Telidon palette (ASCII-safe)
-    let colorByte = 0x40; // Default to black
-    if (color.r > 200 && color.g < 100 && color.b < 100) {
-      colorByte = 0x52; // Red (ASCII 'R')
-    } else if (color.r < 100 && color.g > 200 && color.b < 100) {
-      colorByte = 0x47; // Green (ASCII 'G')
-    } else if (color.r < 100 && color.g < 100 && color.b > 200) {
-      colorByte = 0x42; // Blue (ASCII 'B')
-    } else if (color.r > 200 && color.g > 200 && color.b < 100) {
-      colorByte = 0x59; // Yellow (ASCII 'Y')
-    } else if (color.r > 200 && color.g < 100 && color.b > 200) {
-      colorByte = 0x4D; // Magenta (ASCII 'M')
-    } else if (color.r < 100 && color.g > 200 && color.b > 200) {
-      colorByte = 0x43; // Cyan (ASCII 'C')
-    } else if ((color.r + color.g + color.b) / 3 > 200) {
-      colorByte = 0x57; // White (ASCII 'W')
-    } else if ((color.r + color.g + color.b) / 3 > 100) {
-      colorByte = 0x4C; // Light gray (ASCII 'L')
-    } else {
-      colorByte = 0x40; // Black
+
+    const r = color.r; // 0-255
+    const g = color.g;
+    const b = color.b;
+
+    for (let i = 0; i < 4; i++) {
+      const shift = 7 - 2 * i; // i=0→7, i=1→5, i=2→3, i=3→1
+      const gHi = (g >> shift) & 1;
+      const gLo = (g >> (shift - 1)) & 1;
+      const rHi = (r >> shift) & 1;
+      const rLo = (r >> (shift - 1)) & 1;
+      const bHi = (b >> shift) & 1;
+      const bLo = (b >> (shift - 1)) & 1;
+      this.data.push(0x40 | (gHi << 5) | (rHi << 4) | (bHi << 3) | (gLo << 2) | (rLo << 1) | bLo);
     }
-    this.data.push(colorByte);
   }
 
   // Add a filled rectangle as a polygon (4 points)
