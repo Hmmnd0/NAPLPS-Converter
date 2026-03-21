@@ -293,15 +293,13 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
     const encoder = new NAPLPSFoxtoolboxEncoder();
 
     for (const rect of rectangles) {
-      const originalColor = parseColor(rect.color);
-      const quantizedColor = quantizeColor(originalColor);
-
+      const color = parseColor(rect.color);
       const topLeftX = rect.x / width;
       const topLeftY = rect.y / height;
       const bottomRightX = (rect.x + rect.width) / width;
       const bottomRightY = (rect.y + rect.height) / height;
 
-      encoder.setColor(quantizedColor);
+      encoder.setColor(color);
       encoder.addFilledRectangle(
         { x: topLeftX, y: topLeftY },
         { x: bottomRightX, y: bottomRightY }
@@ -309,18 +307,14 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
     }
 
     for (const shape of polygons) {
-      const originalColor = parseColor(shape.color);
-      const quantizedColor = quantizeColor(originalColor);
-      encoder.setColor(quantizedColor);
+      encoder.setColor(parseColor(shape.color));
       encoder.addPolygon(
         shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
       );
     }
 
     for (const shape of circles) {
-      const originalColor = parseColor(shape.color);
-      const quantizedColor = quantizeColor(originalColor);
-      encoder.setColor(quantizedColor);
+      encoder.setColor(parseColor(shape.color));
       encoder.addPolygon(
         shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
       );
