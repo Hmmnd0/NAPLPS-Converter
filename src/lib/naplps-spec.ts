@@ -60,16 +60,6 @@ function polyFilledRect(x1: number, y1: number, x2: number, y2: number): number[
   ];
 }
 
-// Build SET & POLY OUTLINED (0x36) rectangle as 4 polygon points.
-function polyOutlinedRect(x1: number, y1: number, x2: number, y2: number): number[] {
-  return [
-    0x36, // SET & POLY OUTLINED
-    ...pack12bitCoords(x1, y1),
-    ...pack12bitCoords(x2, y1),
-    ...pack12bitCoords(x2, y2),
-    ...pack12bitCoords(x1, y2),
-  ];
-}
 
 function toHex(bytes: number[]): string {
   return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -130,20 +120,6 @@ export class NaplpsSpecEncoder {
 
 // ─── Test file generators ─────────────────────────────────────────────────────
 
-export function generateSpecMinimalRectangle(): string {
-  const enc = new NaplpsSpecEncoder();
-  enc.setColor(255, 0, 0); // Red
-  enc.addFilledRectangle(0.4, 0.4, 0.6, 0.6);
-  enc.data.push(0x0F); // SI (end of graphics)
-  return enc.getHexString();
-}
-
-export function generateSpecMinimalText(): string {
-  const enc = new NaplpsSpecEncoder();
-  enc.addText('HELLO');
-  return enc.getHexString();
-}
-
 export function generateTelidonP5TextFile(text: string): string {
   const ascii = Array.from(text).map(c => c.charCodeAt(0));
   return toHex([
@@ -177,15 +153,6 @@ export function generateTelidonP5HybridFile(text: string): string {
   ]);
 }
 
-export function generateTelidonP5Rectangle8ByteFile(): string {
-  return toHex([
-    ...NAPLPS_HEADER,
-    ...setColorBytes(255, 0, 0), // Red
-    ...polyFilledRect(0.4, 0.4, 0.6, 0.6),
-    0x0F, // SI (end of graphics)
-  ]);
-}
-
 // POINT SET ABS (0x24) — positions drawing cursor and draws a point.
 export function generateTelidonP5PointFile(): string {
   return toHex([
@@ -206,15 +173,6 @@ export function generateTelidonP5LineFile(): string {
     ...pack12bitCoords(0.2, 0.2),
     0x28, // LINE ABS (draw to endpoint)
     ...pack12bitCoords(0.8, 0.8),
-    0x0F, // SI (end of graphics)
-  ]);
-}
-
-export function generateTelidonP5RectangleOutlinedFile(): string {
-  return toHex([
-    ...NAPLPS_HEADER,
-    ...setColorBytes(255, 0, 0), // Red
-    ...polyOutlinedRect(0.4, 0.4, 0.6, 0.6),
     0x0F, // SI (end of graphics)
   ]);
 }

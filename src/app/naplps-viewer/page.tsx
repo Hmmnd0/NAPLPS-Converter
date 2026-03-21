@@ -28,7 +28,6 @@ export default function NaplpsViewer() {
     setError("");
     const file = e.target.files?.[0];
     if (!file) return;
-    console.log("File selected:", file.name);
     const reader = new FileReader();
     reader.onload = (event) => {
       const arrayBuffer = event.target?.result;
@@ -36,30 +35,29 @@ export default function NaplpsViewer() {
         setError("Could not read file as ArrayBuffer");
         return;
       }
-      console.log("File read as ArrayBuffer, length:", (arrayBuffer as ArrayBuffer).byteLength);
-      
-      // Clear previous content
+
       if (canvasRef.current) {
         canvasRef.current.innerHTML = '<span class="text-gray-400">Loading...</span>';
       }
-      
-      // Wait for TelidonP5 to be loaded
+
+      // Wait for TelidonP5 to be loaded (max 5 seconds)
+      let attempts = 0;
       const tryRender = () => {
         if (window.TelidonP5 && window.p5) {
-          console.log("TelidonP5 and p5 loaded, calling renderBinary...");
           try {
             window.TelidonP5.renderBinary(
               new Uint8Array(arrayBuffer as ArrayBuffer),
               canvasRef.current
             );
-            console.log("TelidonP5.renderBinary called successfully");
           } catch (err) {
             setError("Error rendering NAPLPS: " + (err instanceof Error ? err.message : String(err)));
             console.error("Error rendering NAPLPS:", err);
           }
-        } else {
-          console.log("TelidonP5 or p5 not loaded yet, retrying...");
+        } else if (attempts < 25) {
+          attempts++;
           setTimeout(tryRender, 200);
+        } else {
+          setError("Timed out waiting for TelidonP5 to load.");
         }
       };
       tryRender();

@@ -6,6 +6,43 @@ import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
 import { svgToNaplps, svgToNaplpsFoxtoolbox, getConversionStats } from '@/lib/svgToNaplps';
 
+// ─── Download helpers ─────────────────────────────────────────────────────────
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.replace(/\s+/g, '');
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < clean.length; i += 2) {
+    bytes[i / 2] = parseInt(clean.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+function downloadBinary(bytes: Uint8Array, filename: string) {
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadText(content: string, filename: string, mimeType = 'text/plain') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [originalPreview, setOriginalPreview] = useState<string | null>(null);
@@ -42,13 +79,11 @@ export default function Home() {
     setConversionStats(null);
 
     try {
-      // Create preview
       const reader = new FileReader();
       reader.onload = async (e) => {
         const dataUrl = e.target?.result as string;
         setOriginalPreview(dataUrl);
 
-        // Pixel-perfect SVG vectorization
         try {
           setSvgReady(false);
           const timeoutPromise = new Promise((_, reject) => {
@@ -79,11 +114,10 @@ export default function Home() {
     setNaplpsData('');
     setConversionStats(null);
     try {
-      // Get image dimensions for NAPLPS conversion
       const img = new Image();
       img.onload = async () => {
         try {
-          const naplps = useFoxtoolboxApproach 
+          const naplps = useFoxtoolboxApproach
             ? await svgToNaplpsFoxtoolbox(svgString, img.width, img.height)
             : await svgToNaplps(svgString, img.width, img.height);
           setNaplpsData(naplps);
@@ -101,7 +135,6 @@ export default function Home() {
     }
   };
 
-  // SVG direct upload handler
   const handleSvgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -121,7 +154,6 @@ export default function Home() {
     setSvgUploadError('');
     setSvgUploadNaplpsData('');
     try {
-      // Extract dimensions from SVG viewBox or width/height attributes
       const parser = new DOMParser();
       const doc = parser.parseFromString(svgUploadString, 'image/svg+xml');
       const svgEl = doc.querySelector('svg');
@@ -147,22 +179,6 @@ export default function Home() {
     setIsSvgUploadProcessing(false);
   };
 
-  const downloadSvgUploadNap = (hex: string, filename: string) => {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-      bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Optionally, add a button to run NAPLPS conversion from SVG later
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
@@ -181,8 +197,8 @@ export default function Home() {
             NAPLPS Converter
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Convert PNG images to NAPLPS (North American Presentation Layer Protocol Syntax) format. 
-            This tool analyzes images and converts them to vector graphics primitives used in vintage 
+            Convert PNG images to NAPLPS (North American Presentation Layer Protocol Syntax) format.
+            This tool analyzes images and converts them to vector graphics primitives used in vintage
             teletext and videotex systems.
           </p>
         </div>
@@ -190,7 +206,7 @@ export default function Home() {
         {/* File Upload */}
         <div className="mb-8">
           <FileUpload onFileSelect={handleFileSelect} isProcessing={isProcessing} />
-          
+
           {/* Progress Bar */}
           {isProcessing && (
             <div className="mt-4">
@@ -199,7 +215,7 @@ export default function Home() {
                 <span>{Math.round(processingProgress * 100)}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
+                <div
                   className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${processingProgress * 100}%` }}
                 ></div>
@@ -223,9 +239,9 @@ export default function Home() {
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Original Image</h2>
               <div className="border border-gray-300 rounded-lg overflow-hidden flex items-center justify-center min-h-[200px] bg-white">
                 {originalPreview ? (
-                  <img 
-                    src={originalPreview} 
-                    alt="Original" 
+                  <img
+                    src={originalPreview}
+                    alt="Original"
                     className="w-full h-auto"
                     style={{ maxHeight: '400px', objectFit: 'contain' }}
                   />
@@ -253,20 +269,8 @@ export default function Home() {
                 <button
                   className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                   onClick={() => {
-                    console.log('Download SVG button clicked');
-                    const svgWithHeader = `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n${svgString}`;
-                    console.log('SVG length:', svgWithHeader.length);
-                    try {
-                      const blob = new Blob([svgWithHeader], { type: 'image/svg+xml' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'output.svg';
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    } catch (err) {
-                      alert('Failed to download SVG: ' + err);
-                    }
+                    const svgWithHeader = `<?xml version="1.0" encoding="UTF-8"?>\n${svgString}`;
+                    downloadText(svgWithHeader, 'output.svg', 'image/svg+xml');
                   }}
                 >
                   Download SVG
@@ -316,38 +320,19 @@ export default function Home() {
                       </div>
                     )}
                     <button
-                      onClick={() => {
-                        const blob = new Blob([naplpsData], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'naplps_output.txt';
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      }}
+                      onClick={() => downloadText(naplpsData, 'naplps_output.txt')}
                       className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
                       Download NAPLPS File
                     </button>
                     <button
                       onClick={() => {
-                        // Convert hex string to binary
                         const hex = naplpsData.replace(/\s+/g, '');
                         if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
                           alert('Invalid hex string: cannot export binary.');
                           return;
                         }
-                        const bytes = new Uint8Array(hex.length / 2);
-                        for (let i = 0; i < hex.length; i += 2) {
-                          bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                        }
-                        const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'naplps_output.nap';
-                        a.click();
-                        URL.revokeObjectURL(url);
+                        downloadBinary(hexToBytes(hex), 'naplps_output.nap');
                       }}
                       className="w-full mt-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                     >
@@ -381,20 +366,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         import('@/lib/naplps-spec').then(({ generateTelidonP5TextFile }) => {
-                          const hex = generateTelidonP5TextFile('HELLO');
-                          const bytes = new Uint8Array(hex.length / 2);
-                          for (let i = 0; i < hex.length; i += 2) {
-                            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                          }
-                          const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = 'telidonp5_text_test.nap';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
+                          downloadBinary(hexToBytes(generateTelidonP5TextFile('HELLO')), 'telidonp5_text_test.nap');
                         });
                       }}
                       className="w-full px-3 py-2 bg-green-700 text-white text-sm rounded-md hover:bg-green-800 transition-colors flex items-center justify-center gap-2"
@@ -405,20 +377,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         import('@/lib/naplps-spec').then(({ generateTelidonP5RectangleFile }) => {
-                          const hex = generateTelidonP5RectangleFile();
-                          const bytes = new Uint8Array(hex.length / 2);
-                          for (let i = 0; i < hex.length; i += 2) {
-                            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                          }
-                          const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = 'telidonp5_rectangle_test.nap';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
+                          downloadBinary(hexToBytes(generateTelidonP5RectangleFile()), 'telidonp5_rectangle_test.nap');
                         });
                       }}
                       className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
@@ -429,20 +388,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         import('@/lib/naplps-spec').then(({ generateTelidonP5HybridFile }) => {
-                          const hex = generateTelidonP5HybridFile('HELLO');
-                          const bytes = new Uint8Array(hex.length / 2);
-                          for (let i = 0; i < hex.length; i += 2) {
-                            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                          }
-                          const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = 'telidonp5_hybrid_test.nap';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
+                          downloadBinary(hexToBytes(generateTelidonP5HybridFile('HELLO')), 'telidonp5_hybrid_test.nap');
                         });
                       }}
                       className="w-full px-3 py-2 bg-purple-700 text-white text-sm rounded-md hover:bg-purple-800 transition-colors flex items-center justify-center gap-2"
@@ -453,20 +399,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         import('@/lib/naplps-spec').then(({ generateTelidonP5PolygonRectangleFile }) => {
-                          const hex = generateTelidonP5PolygonRectangleFile();
-                          const bytes = new Uint8Array(hex.length / 2);
-                          for (let i = 0; i < hex.length; i += 2) {
-                            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                          }
-                          const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = 'telidonp5_polygon_rectangle_test.nap';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
+                          downloadBinary(hexToBytes(generateTelidonP5PolygonRectangleFile()), 'telidonp5_polygon_rectangle_test.nap');
                         });
                       }}
                       className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
@@ -474,75 +407,38 @@ export default function Home() {
                       <span className="w-2 h-2 bg-white rounded-full"></span>
                       TelidonP5.js Polygon Rectangle Test
                     </button>
-                    {/* Minimal NAPLPS Rectangle Download Button */}
                     <button
                       className="w-full px-3 py-2 bg-blue-700 text-white text-sm rounded-md hover:bg-blue-800 transition-colors flex items-center justify-center gap-2"
                       onClick={async () => {
                         const { generateTelidonP5RectangleFile } = await import('@/lib/naplps-spec');
-                        const hex = generateTelidonP5RectangleFile();
-                        const bytes = new Uint8Array(hex.length / 2);
-                        for (let i = 0; i < hex.length; i += 2) {
-                          bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-                        }
-                        const blob = new Blob([bytes], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'minimal-rectangle.nap';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
+                        downloadBinary(hexToBytes(generateTelidonP5RectangleFile()), 'minimal-rectangle.nap');
                       }}
                     >
                       <span className="w-2 h-2 bg-white rounded-full"></span>
                       Minimal NAPLPS Rectangle
                     </button>
-                    {/* Bit Test Polygon NAPLPS Button */}
                     <button
                       className="w-full px-3 py-2 bg-yellow-700 text-white text-sm rounded-md hover:bg-yellow-800 transition-colors flex items-center justify-center gap-2"
                       onClick={async () => {
                         const { generateBitTestPolygonNaplps } = await import('@/lib/naplps');
-                        const naplpsData = generateBitTestPolygonNaplps();
-                        const blob = new Blob([naplpsData], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'bit-test-polygon.nap';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
+                        downloadBinary(generateBitTestPolygonNaplps(), 'bit-test-polygon.nap');
                       }}
                     >
                       <span className="w-2 h-2 bg-white rounded-full"></span>
                       Bit Test Polygon (Yellow Rectangle)
                     </button>
-                    {/* Custom Rectangle (Red) NAPLPS Button */}
                     <button
                       className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
                       onClick={async () => {
                         const { generateNaplpsPolygonFile } = await import('@/lib/naplps');
-                        // 5-point rectangle in 512x512 grid (explicitly closed)
                         const points = [
                           { x: 160, y: 120 },
                           { x: 480, y: 120 },
                           { x: 480, y: 360 },
                           { x: 160, y: 360 },
-                          { x: 160, y: 120 } // Repeat first point to close
+                          { x: 160, y: 120 },
                         ];
-                        // Red (Telidon: 0x52)
-                        const colorByte = 0x52;
-                        const naplpsData = generateNaplpsPolygonFile(points, colorByte);
-                        const blob = new Blob([naplpsData], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'custom-rectangle-red.nap';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
+                        downloadBinary(generateNaplpsPolygonFile(points, 0x52), 'custom-rectangle-red.nap');
                       }}
                     >
                       <span className="w-2 h-2 bg-white rounded-full"></span>
@@ -558,30 +454,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* NAPLPS Data (disabled for now) */}
-        {/* {naplpsData && (
-          <div className="mt-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-900">NAPLPS Data</h2>
-              <button
-                onClick={downloadNaplps}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Download NAPLPS File
-              </button>
-            </div>
-            
-            <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto">
-              <pre>{naplpsData}</pre>
-            </div>
-            
-            <div className="mt-4 text-sm text-gray-600">
-              <p>Generated {processedImage?.primitives.length || 0} primitives</p>
-              <p>Data size: {Math.round(naplpsData.length / 2)} bytes</p>
-            </div>
-          </div>
-        )} */}
-
         {/* SVG → NAP Direct Upload */}
         <div className="mt-12 bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">SVG → NAPLPS (Direct Upload)</h2>
@@ -589,7 +461,6 @@ export default function Home() {
             Already have an SVG? Upload it directly to convert to a .nap file — no PNG required.
           </p>
 
-          {/* File input */}
           <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
             <span className="text-gray-500 text-sm mb-1">
               {svgUploadFilename ? svgUploadFilename : 'Click or drag an SVG file here'}
@@ -643,7 +514,7 @@ export default function Home() {
                       className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                       onClick={() => {
                         const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
-                        downloadSvgUploadNap(svgUploadNaplpsData, `${base}.nap`);
+                        downloadBinary(hexToBytes(svgUploadNaplpsData), `${base}.nap`);
                       }}
                     >
                       Download .nap
@@ -652,13 +523,7 @@ export default function Home() {
                       className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                       onClick={() => {
                         const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
-                        const blob = new Blob([svgUploadNaplpsData], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `${base}_naplps.txt`;
-                        a.click();
-                        URL.revokeObjectURL(url);
+                        downloadText(svgUploadNaplpsData, `${base}_naplps.txt`);
                       }}
                     >
                       Download hex (.txt)
@@ -686,8 +551,8 @@ export default function Home() {
           <h3 className="text-lg font-semibold text-gray-900 mb-4">About NAPLPS</h3>
           <div className="prose prose-sm text-gray-600">
             <p>
-              NAPLPS (North American Presentation Layer Protocol Syntax) was a graphics language 
-              developed in the 1980s for videotex and teletext services. It was used by services 
+              NAPLPS (North American Presentation Layer Protocol Syntax) was a graphics language
+              developed in the 1980s for videotex and teletext services. It was used by services
               like Prodigy and various cable television systems to display graphics and text.
             </p>
             <p>
