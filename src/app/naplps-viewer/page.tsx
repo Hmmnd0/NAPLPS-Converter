@@ -72,7 +72,7 @@ export default function NaplpsViewer() {
   };
 
   return (
-    <div className="max-w-[600px] mx-auto py-8">
+    <div className="flex flex-col items-center py-8 w-full">
       <h1 className="text-2xl font-bold mb-4">NAPLPS Viewer (TelidonP5.js)</h1>
       <input
         type="file"
