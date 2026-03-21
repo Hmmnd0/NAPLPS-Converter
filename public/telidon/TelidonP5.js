@@ -249,7 +249,18 @@ class TelidonDrawCmd {
         this.moveScanline = false;
         this.progressiveDraw = true;
         this.labelPoints = false;
-        this.col = (p && typeof p.color === 'function') ? p.color(0) : null;
+        // Initialize color from the NapCmd's decoded color (naplps_lastColor at the time
+        // the command was parsed). Falls back to black if no valid color is available.
+        if (p && typeof p.color === 'function') {
+            const cmdCol = _cmd.col;
+            if (cmdCol && typeof cmdCol.x !== 'undefined') {
+                this.col = p.color(cmdCol.x, cmdCol.y, cmdCol.z);
+            } else {
+                this.col = p.color(0);
+            }
+        } else {
+            this.col = null;
+        }
         this.thickness = 1;
         this.text = "";
         this.markTime = 0;
