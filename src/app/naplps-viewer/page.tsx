@@ -47,7 +47,9 @@ export default function NaplpsViewer() {
           try {
             window.TelidonP5.renderBinary(
               new Uint8Array(arrayBuffer as ArrayBuffer),
-              canvasRef.current
+              canvasRef.current,
+              560,
+              420
             );
           } catch (err) {
             setError("Error rendering NAPLPS: " + (err instanceof Error ? err.message : String(err)));
@@ -70,7 +72,7 @@ export default function NaplpsViewer() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-8">
+    <div className="max-w-[600px] mx-auto py-8">
       <h1 className="text-2xl font-bold mb-4">NAPLPS Viewer (TelidonP5.js)</h1>
       <input
         type="file"
@@ -82,8 +84,8 @@ export default function NaplpsViewer() {
       <div
         ref={canvasRef}
         id="telidon-canvas"
-        className="border rounded bg-gray-100 min-h-[400px] flex items-center justify-center"
-        style={{ minHeight: 400 }}
+        className="border rounded bg-gray-100 flex items-center justify-center"
+        style={{ width: 560, height: 420 }}
       >
         <span className="text-gray-400">Upload a .nap file to view</span>
       </div>

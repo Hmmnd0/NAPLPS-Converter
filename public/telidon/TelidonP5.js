@@ -1009,7 +1009,7 @@ if (typeof window !== 'undefined') {
     console.log('[TelidonP5.js] Creating window.TelidonP5...');
     window.TelidonP5 = {
         _p5Instance: null,
-        renderBinary: function(bytes, container) {
+        renderBinary: function(bytes, container, width = 400, height = 400) {
             debugLog('renderBinary', 'Function called', {
                 bytesLength: bytes.length,
                 hasContainer: !!container,
@@ -1054,7 +1054,7 @@ if (typeof window !== 'undefined') {
                 
                 p.setup = function() {
                     debugLog('renderBinary', 'p5 setup called');
-                    const canvas = p.createCanvas(400, 400);
+                    const canvas = p.createCanvas(width, height);
                     
                     if (container) {
                         canvas.parent(container);
@@ -1095,14 +1095,14 @@ if (typeof window !== 'undefined') {
                             firstFewChars: naplpsString.substring(0, 20)
                         });
                         
-                        telidonDraw = new window.TelidonDraw([naplpsString], 400, 400, p);
+                        telidonDraw = new window.TelidonDraw([naplpsString], width, height, p);
                         debugLog('renderBinary', 'TelidonDraw created', {
                             commands: telidonDraw.drawCmds.length,
                             p5Available: !!telidonDraw.p,
-                            canvasSize: { width: 400, height: 400 }
+                            canvasSize: { width, height }
                         });
-                        
-                        window.NAPLPS_DEBUG.canvasSize = { width: 400, height: 400 };
+
+                        window.NAPLPS_DEBUG.canvasSize = { width, height };
                         
                     } catch (error) {
                         const errorMsg = `Error rendering NAPLPS: ${error.message}`;
