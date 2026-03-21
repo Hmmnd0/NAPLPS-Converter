@@ -101,68 +101,46 @@ export class NAPLPSEncoder {
     this.data.push(value);
   }
 
-  // Encode a coordinate value using NAPLPS fractional coordinate system
+  // Encode a coordinate value as two data bytes (12-bit, 0x40 offset).
+  // Input: 0–63 (already scaled) or 0.0–1.0 fraction. Output: [hi, lo] in 0x40–0x7F range.
+  // Data bytes must be >= 0x40 to be distinguished from opcodes (0x20–0x3F).
   private encodeCoordinate(value: number): number[] {
-    // If value is already in 0-63 range (from scaled coordinates), use it directly
-    // Otherwise, convert to fractional coordinate (0.0 to 1.0) then to NAPLPS format
-    let clamped: number;
-    
-    if (value >= 0 && value <= 63) {
-      // Already in NAPLPS coordinate range
-      clamped = Math.round(value);
+    let fractional: number;
+    if (value >= 0 && value <= 1.0) {
+      fractional = value;
     } else {
-      // Convert from original image coordinates to NAPLPS coordinates
-      const fractional = value / Math.max(this.width, this.height);
-      const scaled = Math.round(fractional * 63);
-      clamped = Math.max(0, Math.min(63, scaled));
+      fractional = value / Math.max(this.width, this.height);
     }
-    
-    // Encode as ASCII (add 0x20 offset)
-    return [clamped + 0x20];
+    const scaled = Math.max(0, Math.min(4095, Math.round(fractional * 4095)));
+    const hi = (scaled >> 6) & 0x3F;
+    const lo = scaled & 0x3F;
+    return [0x40 + hi, 0x40 + lo];
   }
 
-  // Encode a point
+  // Encode a point as 4 bytes: [xHi, xLo, yHi, yLo]
   private encodePoint(point: NAPLPSPoint): number[] {
     const x = this.encodeCoordinate(point.x);
     const y = this.encodeCoordinate(point.y);
     return [...x, ...y];
   }
 
-  // Set color using Telidon format with improved color mapping
+  // Set color using NAPLPS GRB interleaved bit-packing (per NAP.txt spec).
+  // 4 data bytes, each carrying 2 bits per component: bit5=G, bit4=R, bit3=B, bit2=G, bit1=R, bit0=B.
+  // 4 bytes × 2 bits = 8 bits per channel, MSB first. All bytes in 0x40–0x7F range.
   setColor(color: NAPLPSColor): void {
     this.safePush(NAPLPS_PRIMITIVES.SET_COLOR, 'SET_COLOR');
-    
-    // Use a simpler color mapping that stays within ASCII range
-    // Map RGB to a 6-bit color space (0-63) then add 0x20 for ASCII
-    const brightness = (color.r + color.g + color.b) / 3;
-    let colorByte = 0x20; // Default to black (0x20 = space)
-    
-    // Map colors to ASCII-safe values
-    if (color.r > 200 && color.g < 100 && color.b < 100) {
-      colorByte = 0x52; // Red
-    } else if (color.r < 100 && color.g > 200 && color.b < 100) {
-      colorByte = 0x47; // Green
-    } else if (color.r < 100 && color.g < 100 && color.b > 200) {
-      colorByte = 0x42; // Blue
-    } else if (color.r > 200 && color.g > 200 && color.b < 100) {
-      colorByte = 0x59; // Yellow
-    } else if (color.r > 200 && color.g < 100 && color.b > 200) {
-      colorByte = 0x4D; // Magenta
-    } else if (color.r < 100 && color.g > 200 && color.b > 200) {
-      colorByte = 0x43; // Cyan
-    } else if (brightness > 200) {
-      colorByte = 0x57; // White
-    } else if (brightness > 150) {
-      colorByte = 0x4C; // Light gray
-    } else if (brightness > 100) {
-      colorByte = 0x47; // Gray
-    } else if (brightness > 50) {
-      colorByte = 0x44; // Dark gray
-    } else {
-      colorByte = 0x20; // Black
+    const { r, g, b } = color;
+    for (let i = 0; i < 4; i++) {
+      const shift = 7 - 2 * i; // i=0→7, i=1→5, i=2→3, i=3→1
+      const gHi = (g >> shift) & 1;
+      const gLo = (g >> (shift - 1)) & 1;
+      const rHi = (r >> shift) & 1;
+      const rLo = (r >> (shift - 1)) & 1;
+      const bHi = (b >> shift) & 1;
+      const bLo = (b >> (shift - 1)) & 1;
+      const byte = 0x40 | (gHi << 5) | (rHi << 4) | (bHi << 3) | (gLo << 2) | (rLo << 1) | bLo;
+      this.safePush(byte, `Color byte ${i}: RGB(${r},${g},${b})`);
     }
-    
-    this.safePush(colorByte, `Color: RGB(${color.r},${color.g},${color.b}) -> ASCII(0x${colorByte.toString(16)})`);
   }
 
   // Set background color
@@ -177,55 +155,46 @@ export class NAPLPSEncoder {
     this.setColor(color);
   }
 
-  // Add a rectangle primitive (Telidon format)
+  // Add a filled rectangle as SET & POLY FILLED (0x37) with 4 polygon corner points.
+  // The decoder's special path for SET & POLY FILLED handles 12-bit per-axis coordinates.
   addRectangle(topLeft: NAPLPSPoint, bottomRight: NAPLPSPoint, color?: NAPLPSColor): void {
-    const beforeLen = this.data.length;
-    
-    // Set color if provided
     if (color) {
       this.setColor(color);
     }
-    
-    // Use RECT_FILLED for filled rectangles
-    this.safePush(NAPLPS_PRIMITIVES.RECT_FILLED, 'RECT_FILLED');
-    
-    // Encode points
-    const pt1 = this.encodePoint(topLeft);
-    const pt2 = this.encodePoint(bottomRight);
-    this.safePush(pt1[0], 'Rectangle top-left X');
-    this.safePush(pt1[1], 'Rectangle top-left Y');
-    this.safePush(pt2[0], 'Rectangle bottom-right X');
-    this.safePush(pt2[1], 'Rectangle bottom-right Y');
-    
-    // Debug: log all bytes written for this rectangle
-    const afterLen = this.data.length;
-    const rectBytes = this.data.slice(beforeLen, afterLen);
-    console.log('[DEBUG] Rectangle bytes:', rectBytes);
+    this.safePush(NAPLPS_PRIMITIVES.SET_POLY_FILLED, 'SET_POLY_FILLED');
+    // Encode 4 corners: topLeft, topRight, bottomRight, bottomLeft
+    const corners = [
+      topLeft,
+      { x: bottomRight.x, y: topLeft.y },
+      bottomRight,
+      { x: topLeft.x, y: bottomRight.y },
+    ];
+    for (const pt of corners) {
+      const encoded = this.encodePoint(pt);
+      for (const b of encoded) this.safePush(b, 'polygon point byte');
+    }
   }
 
-  // Add a point primitive
+  // Add a point primitive (POINT SET ABS 0x24 — sets cursor and draws point)
   addPoint(point: NAPLPSPoint, color?: NAPLPSColor): void {
     if (color) {
       this.setColor(color);
     }
-    this.safePush(NAPLPS_PRIMITIVES.POINT_ABS, 'POINT_ABS');
-    const encodedPoint = this.encodePoint(point);
-    this.safePush(encodedPoint[0], 'Point X');
-    this.safePush(encodedPoint[1], 'Point Y');
+    this.safePush(NAPLPS_PRIMITIVES.POINT_SET_ABS, 'POINT_SET_ABS');
+    const encoded = this.encodePoint(point); // [xHi, xLo, yHi, yLo]
+    for (const b of encoded) this.safePush(b, 'point byte');
   }
 
-  // Add a line primitive
+  // Add a line primitive (SET & LINE ABS 0x2A — sets start point, draws to end)
   addLine(start: NAPLPSPoint, end: NAPLPSPoint, color?: NAPLPSColor): void {
     if (color) {
       this.setColor(color);
     }
-    this.safePush(NAPLPS_PRIMITIVES.LINE_ABS, 'LINE_ABS');
-    const startPoint = this.encodePoint(start);
-    const endPoint = this.encodePoint(end);
-    this.safePush(startPoint[0], 'Line start X');
-    this.safePush(startPoint[1], 'Line start Y');
-    this.safePush(endPoint[0], 'Line end X');
-    this.safePush(endPoint[1], 'Line end Y');
+    this.safePush(NAPLPS_PRIMITIVES.SET_LINE_ABS, 'SET_LINE_ABS');
+    const startEncoded = this.encodePoint(start); // [xHi, xLo, yHi, yLo]
+    const endEncoded = this.encodePoint(end);
+    for (const b of startEncoded) this.safePush(b, 'line start byte');
+    for (const b of endEncoded) this.safePush(b, 'line end byte');
   }
 
   // Get the encoded data as Uint8Array
@@ -349,49 +318,28 @@ export class NAPLPSEncoder {
     return data.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  // Test function to verify color encoding matches Foxtoolbox
+  // Test function to verify color encoding (4-byte GRBGRB format)
   static testColorEncoding(): void {
-    console.log('[COLOR TEST] Testing NAPLPS color encoding...');
-    
+    console.log('[COLOR TEST] Testing NAPLPS GRB color encoding...');
     const testColors = [
-      { r: 0, g: 0, b: 0 },         // Black
-      { r: 255, g: 0, b: 0 },       // Red
-      { r: 0, g: 255, b: 0 },       // Green
-      { r: 0, g: 0, b: 255 },       // Blue
-      { r: 255, g: 255, b: 255 },   // White
-      { r: 128, g: 128, b: 128 },   // Gray
+      { r: 0, g: 0, b: 0 },       // Black
+      { r: 255, g: 0, b: 0 },     // Red
+      { r: 0, g: 255, b: 0 },     // Green
+      { r: 0, g: 0, b: 255 },     // Blue
+      { r: 255, g: 255, b: 255 }, // White
+      { r: 128, g: 128, b: 128 }, // Gray
     ];
-    
     testColors.forEach((color, i) => {
-      const brightness = (color.r + color.g + color.b) / 3;
-      let colorByte = 0x20; // Default to black
-      
-      // Map colors to ASCII-safe values
-      if (color.r > 200 && color.g < 100 && color.b < 100) {
-        colorByte = 0x52; // Red
-      } else if (color.r < 100 && color.g > 200 && color.b < 100) {
-        colorByte = 0x47; // Green
-      } else if (color.r < 100 && color.g < 100 && color.b > 200) {
-        colorByte = 0x42; // Blue
-      } else if (color.r > 200 && color.g > 200 && color.b < 100) {
-        colorByte = 0x59; // Yellow
-      } else if (color.r > 200 && color.g < 100 && color.b > 200) {
-        colorByte = 0x4D; // Magenta
-      } else if (color.r < 100 && color.g > 200 && color.b > 200) {
-        colorByte = 0x43; // Cyan
-      } else if (brightness > 200) {
-        colorByte = 0x57; // White
-      } else if (brightness > 150) {
-        colorByte = 0x4C; // Light gray
-      } else if (brightness > 100) {
-        colorByte = 0x47; // Gray
-      } else if (brightness > 50) {
-        colorByte = 0x44; // Dark gray
-      } else {
-        colorByte = 0x20; // Black
+      const { r, g, b } = color;
+      const bytes: number[] = [];
+      for (let j = 0; j < 4; j++) {
+        const shift = 7 - 2 * j;
+        const gHi = (g >> shift) & 1, gLo = (g >> (shift - 1)) & 1;
+        const rHi = (r >> shift) & 1, rLo = (r >> (shift - 1)) & 1;
+        const bHi = (b >> shift) & 1, bLo = (b >> (shift - 1)) & 1;
+        bytes.push(0x40 | (gHi << 5) | (rHi << 4) | (bHi << 3) | (gLo << 2) | (rLo << 1) | bLo);
       }
-      
-      console.log(`Color ${i}: RGB(${color.r},${color.g},${color.b}) -> ASCII(0x${colorByte.toString(16)})`);
+      console.log(`Color ${i}: RGB(${r},${g},${b}) -> [${bytes.map(b => '0x' + b.toString(16)).join(', ')}]`);
     });
   }
 }
