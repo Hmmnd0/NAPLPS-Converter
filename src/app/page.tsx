@@ -24,6 +24,13 @@ export default function Home() {
   const [isNaplpsProcessing, setIsNaplpsProcessing] = useState<boolean>(false);
   const [useFoxtoolboxApproach, setUseFoxtoolboxApproach] = useState<boolean>(true);
 
+  // SVG direct upload → NAP state
+  const [svgUploadString, setSvgUploadString] = useState<string | null>(null);
+  const [svgUploadFilename, setSvgUploadFilename] = useState<string>('');
+  const [svgUploadNaplpsData, setSvgUploadNaplpsData] = useState<string>('');
+  const [isSvgUploadProcessing, setIsSvgUploadProcessing] = useState<boolean>(false);
+  const [svgUploadError, setSvgUploadError] = useState<string>('');
+
   const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
     setProcessingProgress(0);
@@ -92,6 +99,66 @@ export default function Home() {
       setError(err instanceof Error ? err.message : 'An error occurred while processing the SVG');
       setIsNaplpsProcessing(false);
     }
+  };
+
+  // SVG direct upload handler
+  const handleSvgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSvgUploadNaplpsData('');
+    setSvgUploadError('');
+    setSvgUploadFilename(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setSvgUploadString(ev.target?.result as string);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSvgUploadConvert = async () => {
+    if (!svgUploadString) return;
+    setIsSvgUploadProcessing(true);
+    setSvgUploadError('');
+    setSvgUploadNaplpsData('');
+    try {
+      // Extract dimensions from SVG viewBox or width/height attributes
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgUploadString, 'image/svg+xml');
+      const svgEl = doc.querySelector('svg');
+      let width = 0, height = 0;
+      const viewBox = svgEl?.getAttribute('viewBox');
+      if (viewBox) {
+        const parts = viewBox.trim().split(/[\s,]+/);
+        width = parseFloat(parts[2]) || 0;
+        height = parseFloat(parts[3]) || 0;
+      }
+      if (!width) width = parseFloat(svgEl?.getAttribute('width') || '0');
+      if (!height) height = parseFloat(svgEl?.getAttribute('height') || '0');
+      if (!width || !height) {
+        setSvgUploadError('Could not determine SVG dimensions. Make sure the SVG has a viewBox or width/height attributes.');
+        setIsSvgUploadProcessing(false);
+        return;
+      }
+      const naplps = await svgToNaplpsFoxtoolbox(svgUploadString, width, height);
+      setSvgUploadNaplpsData(naplps);
+    } catch (err) {
+      setSvgUploadError('Conversion failed: ' + (err instanceof Error ? err.message : String(err)));
+    }
+    setIsSvgUploadProcessing(false);
+  };
+
+  const downloadSvgUploadNap = (hex: string, filename: string) => {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    }
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Optionally, add a button to run NAPLPS conversion from SVG later
@@ -514,6 +581,100 @@ export default function Home() {
             </div>
           </div>
         )} */}
+
+        {/* SVG → NAP Direct Upload */}
+        <div className="mt-12 bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">SVG → NAPLPS (Direct Upload)</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Already have an SVG? Upload it directly to convert to a .nap file — no PNG required.
+          </p>
+
+          {/* File input */}
+          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+            <span className="text-gray-500 text-sm mb-1">
+              {svgUploadFilename ? svgUploadFilename : 'Click or drag an SVG file here'}
+            </span>
+            <span className="text-xs text-gray-400">.svg files only</span>
+            <input
+              type="file"
+              accept=".svg,image/svg+xml"
+              className="hidden"
+              onChange={handleSvgUpload}
+            />
+          </label>
+
+          {svgUploadError && (
+            <p className="mt-3 text-sm text-red-700">{svgUploadError}</p>
+          )}
+
+          {svgUploadString && (
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* SVG Preview */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">SVG Preview</h3>
+                <div className="border border-gray-200 rounded-lg bg-white flex items-center justify-center min-h-[200px] overflow-hidden">
+                  <div
+                    className="w-full h-auto"
+                    style={{ maxHeight: '360px' }}
+                    dangerouslySetInnerHTML={{ __html: svgUploadString }}
+                  />
+                </div>
+                <button
+                  className="mt-4 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  onClick={handleSvgUploadConvert}
+                  disabled={isSvgUploadProcessing}
+                >
+                  {isSvgUploadProcessing ? 'Converting…' : 'Convert to NAPLPS'}
+                </button>
+              </div>
+
+              {/* NAP Output */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">NAPLPS Output</h3>
+                {svgUploadNaplpsData ? (
+                  <div className="space-y-3">
+                    <div className="bg-gray-900 text-green-400 p-3 rounded font-mono text-xs overflow-x-auto" style={{ maxHeight: '200px' }}>
+                      <pre>{svgUploadNaplpsData}</pre>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      {Math.floor(svgUploadNaplpsData.length / 2)} bytes
+                    </p>
+                    <button
+                      className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      onClick={() => {
+                        const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
+                        downloadSvgUploadNap(svgUploadNaplpsData, `${base}.nap`);
+                      }}
+                    >
+                      Download .nap
+                    </button>
+                    <button
+                      className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      onClick={() => {
+                        const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
+                        const blob = new Blob([svgUploadNaplpsData], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${base}_naplps.txt`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      Download hex (.txt)
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border border-gray-200 rounded-lg bg-gray-50 flex items-center justify-center min-h-[200px]">
+                    <span className="text-gray-400 text-sm">
+                      {isSvgUploadProcessing ? 'Converting…' : 'No output yet'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* SVG Accuracy Test */}
         <div className="mt-8">
