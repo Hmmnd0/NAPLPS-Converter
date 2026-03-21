@@ -1,133 +1,141 @@
 # NAPLPS Converter
 
-A modern web application that converts PNG images to NAPLPS (North American Presentation Layer Protocol Syntax) format. This tool analyzes images and converts them to vector graphics primitives used in vintage teletext and videotex systems.
+A Next.js web application for converting images to **NAPLPS** (North American Presentation Layer Protocol Syntax) — the vector graphics format used by Telidon, Prodigy, and other 1980s videotex systems.
+
+Live viewer powered by [TelidonP5.js](https://github.com/groundh0g/TelidonP5.js).
+
+---
 
 ## Features
 
-- **Drag & Drop Upload**: Easy file upload with drag-and-drop support
-- **Image Analysis**: Advanced edge detection and shape recognition
-- **NAPLPS Generation**: Converts detected shapes to NAPLPS primitives
-- **Real-time Preview**: See the NAPLPS conversion in real-time
-- **Download Support**: Download generated NAPLPS files
-- **Modern UI**: Clean, responsive interface built with Next.js and Tailwind CSS
+- **PNG → SVG → NAPLPS** — Upload a PNG/JPEG/GIF, vectorize it pixel-perfectly, then convert to a `.nap` file
+- **SVG → NAPLPS (direct)** — Upload any `.svg` directly and convert without going through a PNG
+- **NAPLPS Viewer** — In-browser viewer that renders `.nap` files using TelidonP5.js and p5.js
+- **Test file generators** — One-click download of test `.nap` files (rectangle, polygon, text, hybrid)
+- **Download** — Export as binary `.nap` or hex `.txt`
+
+---
 
 ## What is NAPLPS?
 
-NAPLPS (North American Presentation Layer Protocol Syntax) was a graphics language developed in the 1980s for videotex and teletext services. It was used by services like:
+NAPLPS (ANSI X3.110-1983 / CSA T500-1983) is a binary graphics protocol developed in the early 1980s for transmitting vector graphics over low-bandwidth links. It was used by:
 
-- **Prodigy**: The popular online service
-- **Cable Television**: Various cable systems for graphics display
-- **Teletext Services**: News and information services
+- **Telidon** — Canada's videotex system, the direct ancestor of NAPLPS
+- **Prodigy** — One of the first major US online services (1988–2001)
+- **Cable television** — Interactive program guides and info graphics
 
-NAPLPS supported various graphics primitives:
-- Points and lines
-- Polygons and rectangles
-- Circles and arcs
-- Text elements
-- Color and fill patterns
+Key encoding properties:
+- Opcode bytes `0x20–0x3F` (bit 6 = 0); data bytes `0x40–0x7F` (bit 6 = 1)
+- 12-bit coordinates per axis, packed as two 6-bit nibbles each offset by `0x40`
+- Color via `SET COLOR (0x3C)`: 4-byte GRBGRB interleaved bit-packing (2 bits/channel/byte)
+- Shapes drawn as polygons using `SET & POLY FILLED (0x37)`
 
-## Technical Details
-
-### Image Processing
-The application uses advanced computer vision techniques to analyze PNG images:
-
-1. **Edge Detection**: Sobel operator for edge detection
-2. **Contour Tracing**: Automatic contour detection and tracing
-3. **Shape Recognition**: Detection of lines, circles, and polygons
-4. **Color Analysis**: RGB to NAPLPS color mapping
-
-### NAPLPS Encoding
-The converter generates NAPLPS data using the ANSI X3.110-1983 standard:
-
-- **Control Characters**: SI/SO for graphics mode
-- **Coordinate Encoding**: 6-bit coordinate system
-- **Primitive Types**: Point, line, polyline, polygon, rectangle, circle, text
-- **Color Support**: 8-color NAPLPS palette
+---
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ 
-- npm or yarn
+- Node.js 18+
+- npm
 
 ### Installation
 
-1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd naplps-converter
-```
-
-2. Install dependencies:
-```bash
+git clone https://github.com/Hmmnd0/NextJSNAPLPSProject.git
+cd NextJSNAPLPSProject
 npm install
-```
-
-3. Start the development server:
-```bash
 npm run dev
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+Open [http://localhost:3000](http://localhost:3000).
 
-### Building for Production
+### Build for production
 
 ```bash
 npm run build
 npm start
 ```
 
+---
+
 ## Usage
 
-1. **Upload an Image**: Drag and drop a PNG, JPEG, or GIF file onto the upload area
-2. **Processing**: The application will analyze the image and detect shapes
-3. **Preview**: View the original image alongside the NAPLPS preview
-4. **Download**: Click "Download NAPLPS File" to save the generated data
+### PNG → NAPLPS
+1. Drag and drop (or click to select) a PNG, JPEG, or GIF on the main page
+2. The image is vectorized into an SVG — download the SVG if you want it
+3. Click **Convert SVG to NAPLPS** to encode
+4. Download the `.nap` binary file
+
+### SVG → NAPLPS (direct)
+1. Scroll to the **SVG → NAPLPS (Direct Upload)** section
+2. Upload any `.svg` file — the SVG's `viewBox` or `width`/`height` is used for scaling
+3. Click **Convert to NAPLPS** and download the result
+
+### NAPLPS Viewer
+- Click **Open NAPLPS Viewer** (top right) or navigate to `/naplps-viewer`
+- Upload any `.nap` file to render it in the browser
+
+---
 
 ## Project Structure
 
 ```
 src/
-├── app/                    # Next.js app directory
-│   ├── page.tsx           # Main page component
-│   └── layout.tsx         # Root layout
-├── components/             # React components
-│   ├── FileUpload.tsx     # File upload component
-│   └── NAPLPSViewer.tsx   # NAPLPS preview component
-└── lib/                   # Core libraries
-    ├── naplps.ts          # NAPLPS encoder
-    └── imageProcessor.ts  # Image processing utilities
+├── app/
+│   ├── page.tsx                # Main converter page
+│   ├── naplps-viewer/
+│   │   └── page.tsx            # NAPLPS viewer page
+│   └── layout.tsx
+├── components/
+│   ├── FileUpload.tsx           # Drag-and-drop PNG upload
+│   └── SvgAccuracyTest.tsx
+└── lib/
+    ├── naplps-foxtoolbox.ts    # Main encoder (SVG → NAPLPS)
+    ├── naplps-spec.ts          # Test file generators
+    ├── naplps.ts               # Legacy encoder + utilities
+    ├── svgToNaplps.ts          # SVG parsing and conversion pipeline
+    └── pixelToSvg.ts           # PNG → SVG vectorizer
+
+public/telidon/
+    ├── naplps.js               # NAPLPS binary decoder (NapDecoder)
+    └── TelidonP5.js            # p5.js renderer (TelidonDraw)
+
+docs/
+    ├── NAP.txt                 # NAPLPS spec (Michael Dillon, 1993)
+    ├── Displaying-NAPLPS-graphics-rev1.pdf
+    └── NAPLPS Standard_compressed_compressed.pdf
 ```
 
-## Technologies Used
+---
 
-- **Next.js 15**: React framework with App Router
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first CSS framework
-- **React Dropzone**: File upload handling
-- **Canvas API**: Image processing and rendering
+## Technical Notes
 
-## Historical Context
+### Encoding (naplps-foxtoolbox.ts)
+- **Header**: `CANCEL ESC E NSR SO RESET DOMAIN` — sets 4-byte coordinate mode (`0x4D`)
+- **Color**: `SET COLOR (0x3C)` + 4 data bytes in GRBGRB format
+- **Shapes**: Each rectangle encoded as `SET & POLY FILLED (0x37)` with 4 corner points
+- **Coordinates**: 12-bit per axis → `[0x40 + hi6, 0x40 + lo6]`
 
-This project recreates the technology used in early online services and cable television systems. NAPLPS was particularly important for:
+### Decoding (naplps.js + TelidonP5.js)
+- `parseCommands` splits the byte stream at opcode boundaries
+- `setColor` accumulates 2 bits/channel/byte across 4 bytes → 8-bit RGB
+- `SET & POLY FILLED` uses a dedicated 12-bit coord path (`decodeCoord`)
+- Coordinates are normalized to canvas space as `rawValue / 4095`
 
-- **Prodigy**: One of the first major online services (1984-2001)
-- **Cable Television**: Graphics and information displays
-- **Teletext**: News and information services
-- **Videotex**: Early online information systems
+---
 
-The format was designed to be efficient for low-bandwidth transmission over telephone lines and television signals.
+## Technologies
 
-## Contributing
+- **Next.js 15** with App Router
+- **TypeScript**
+- **Tailwind CSS**
+- **p5.js** — canvas rendering in the viewer
+- **TelidonP5.js** — NAPLPS decoder and renderer
 
-Contributions are welcome! This project is open source and aims to preserve and modernize historical computing technologies.
+---
 
-## License
+## References
 
-This project is licensed under the MIT License.
-
-## Acknowledgments
-
-- Original NAPLPS specification (ANSI X3.110-1983)
-- Prodigy and other vintage online services
-- The retrocomputing community
+- ANSI X3.110-1983 / CSA T500-1983 — NAPLPS standard
+- [NAP.txt](docs/NAP.txt) — Practical NAPLPS reference (Michael Dillon, 1993)
+- [TelidonP5.js](https://github.com/groundh0g/TelidonP5.js) — Browser-based Telidon renderer
