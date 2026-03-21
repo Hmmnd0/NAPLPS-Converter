@@ -1,18 +1,73 @@
 import { NAPLPSEncoder, NAPLPSPoint, NAPLPSColor } from './naplps';
 import { NAPLPSFoxtoolboxEncoder } from './naplps-foxtoolbox';
 
-interface Pixel {
-  x: number;
-  y: number;
-  color: string;
-}
-
 interface Rectangle {
   x: number;
   y: number;
   width: number;
   height: number;
   color: string;
+}
+
+interface PolygonShape {
+  points: Array<{ x: number; y: number }>;
+  color: string;
+}
+
+function parseSvgToPolygons(svgString: string): PolygonShape[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const shapes: PolygonShape[] = [];
+
+  doc.querySelectorAll('polygon, polyline').forEach(el => {
+    const pointsAttr = el.getAttribute('points') || '';
+    const color = el.getAttribute('fill') || '#000000';
+    const nums = pointsAttr.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+    if (nums.length < 4) return; // need at least 2 points
+    const points: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      points.push({ x: nums[i], y: nums[i + 1] });
+    }
+    shapes.push({ points, color });
+  });
+
+  return shapes;
+}
+
+function ellipseToPolygonPoints(cx: number, cy: number, rx: number, ry: number, sides = 24): Array<{ x: number; y: number }> {
+  const points: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = (2 * Math.PI * i) / sides;
+    points.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
+  }
+  return points;
+}
+
+function parseSvgToCirclesAndEllipses(svgString: string): PolygonShape[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const shapes: PolygonShape[] = [];
+
+  doc.querySelectorAll('circle').forEach(el => {
+    const cx = parseFloat(el.getAttribute('cx') || '0');
+    const cy = parseFloat(el.getAttribute('cy') || '0');
+    const r  = parseFloat(el.getAttribute('r')  || '0');
+    const color = el.getAttribute('fill') || '#000000';
+    if (r <= 0) return;
+    shapes.push({ points: ellipseToPolygonPoints(cx, cy, r, r), color });
+  });
+
+  doc.querySelectorAll('ellipse').forEach(el => {
+    const cx = parseFloat(el.getAttribute('cx') || '0');
+    const cy = parseFloat(el.getAttribute('cy') || '0');
+    const rx = parseFloat(el.getAttribute('rx') || '0');
+    const ry = parseFloat(el.getAttribute('ry') || '0');
+    const color = el.getAttribute('fill') || '#000000';
+    if (rx <= 0 || ry <= 0) return;
+    shapes.push({ points: ellipseToPolygonPoints(cx, cy, rx, ry), color });
+  });
+
+  return shapes;
 }
 
 // Telidon 16-color palette (exact values from Telidon specification)
@@ -39,109 +94,26 @@ const TELIDON_PALETTE = [
 function parseSvgToPixels(svgString: string): Rectangle[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const rects = doc.querySelectorAll('rect');
 
-  const pixels: Pixel[] = [];
-  rects.forEach(rect => {
-    const x = parseInt(rect.getAttribute('x') || '0');
-    const y = parseInt(rect.getAttribute('y') || '0');
-    const color = rect.getAttribute('fill') || '#000000';
-    pixels.push({ x, y, color });
-  });
-
-  return groupPixelsIntoRectangles(pixels);
-}
-
-// Group adjacent pixels into optimal rectangles
-function groupPixelsIntoRectangles(pixels: Pixel[]): Rectangle[] {
-  const rectangles: Rectangle[] = [];
-
-  const pixelsByColor = new Map<string, Pixel[]>();
-  pixels.forEach(pixel => {
-    if (!pixelsByColor.has(pixel.color)) {
-      pixelsByColor.set(pixel.color, []);
-    }
-    pixelsByColor.get(pixel.color)!.push(pixel);
-  });
-
-  for (const [, colorPixels] of pixelsByColor) {
-    const colorVisited = new Set<string>();
-    const colorGrid = new Map<string, boolean>();
-    for (const p of colorPixels) {
-      colorGrid.set(`${p.x},${p.y}`, true);
-    }
-
-    for (const pixel of colorPixels) {
-      const key = `${pixel.x},${pixel.y}`;
-      if (colorVisited.has(key)) continue;
-
-      const rect = findLargestRectangleOptimized(pixel, colorVisited, colorGrid);
-      rectangles.push(rect);
-    }
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) {
+    throw new Error('Malformed SVG: ' + (parseError.textContent?.trim().split('\n')[0] ?? 'parse error'));
   }
+
+  const rects = doc.querySelectorAll('rect');
+  const rectangles: Rectangle[] = [];
+  rects.forEach(rect => {
+    const x      = parseInt(rect.getAttribute('x')      || '0');
+    const y      = parseInt(rect.getAttribute('y')      || '0');
+    const width  = parseInt(rect.getAttribute('width')  || '1');
+    const height = parseInt(rect.getAttribute('height') || '1');
+    const color  = rect.getAttribute('fill') || '#000000';
+    rectangles.push({ x, y, width, height, color });
+  });
 
   return rectangles;
 }
 
-// Optimized rectangle finding using a per-color grid lookup
-function findLargestRectangleOptimized(
-  startPixel: Pixel,
-  visited: Set<string>,
-  colorGrid: Map<string, boolean>
-): Rectangle {
-  const color = startPixel.color;
-
-  let maxWidth = 1;
-  for (let w = 1; ; w++) {
-    const key = `${startPixel.x + w},${startPixel.y}`;
-    if (!colorGrid.has(key) || visited.has(key)) break;
-    maxWidth = w + 1;
-  }
-
-  let bestArea = 1;
-  let bestWidth = 1;
-  let bestHeight = 1;
-
-  for (let width = 1; width <= maxWidth; width++) {
-    let height = 1;
-
-    while (true) {
-      let canExtend = true;
-
-      for (let x = 0; x < width; x++) {
-        const key = `${startPixel.x + x},${startPixel.y + height}`;
-        if (!colorGrid.has(key) || visited.has(key)) {
-          canExtend = false;
-          break;
-        }
-      }
-
-      if (!canExtend) break;
-      height++;
-    }
-
-    const area = width * height;
-    if (area > bestArea) {
-      bestArea = area;
-      bestWidth = width;
-      bestHeight = height;
-    }
-  }
-
-  for (let y = 0; y < bestHeight; y++) {
-    for (let x = 0; x < bestWidth; x++) {
-      visited.add(`${startPixel.x + x},${startPixel.y + y}`);
-    }
-  }
-
-  return {
-    x: startPixel.x,
-    y: startPixel.y,
-    width: bestWidth,
-    height: bestHeight,
-    color
-  };
-}
 
 function parseColor(color: string): NAPLPSColor {
   const rgbMatch = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/i);
@@ -278,6 +250,9 @@ function scaleCoordinates(rectangles: Rectangle[], maxWidth: number, maxHeight: 
 export async function svgToNaplps(svgString: string, width: number, height: number): Promise<string> {
   try {
     let rectangles = parseSvgToPixels(svgString);
+    if (rectangles.length === 0) {
+      throw new Error('SVG contains no <rect> elements — output would be empty.');
+    }
     rectangles = optimizeRectangles(rectangles);
     rectangles = scaleCoordinates(rectangles, width, height);
 
@@ -308,6 +283,12 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
   try {
     let rectangles = parseSvgToPixels(svgString);
     rectangles = optimizeRectangles(rectangles);
+    const polygons = parseSvgToPolygons(svgString);
+    const circles  = parseSvgToCirclesAndEllipses(svgString);
+
+    if (rectangles.length === 0 && polygons.length === 0 && circles.length === 0) {
+      throw new Error('SVG contains no supported shapes (<rect>, <polygon>, <polyline>, <circle>, <ellipse>) — output would be empty.');
+    }
 
     const encoder = new NAPLPSFoxtoolboxEncoder();
 
@@ -324,6 +305,24 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
       encoder.addFilledRectangle(
         { x: topLeftX, y: topLeftY },
         { x: bottomRightX, y: bottomRightY }
+      );
+    }
+
+    for (const shape of polygons) {
+      const originalColor = parseColor(shape.color);
+      const quantizedColor = quantizeColor(originalColor);
+      encoder.setColor(quantizedColor);
+      encoder.addPolygon(
+        shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
+      );
+    }
+
+    for (const shape of circles) {
+      const originalColor = parseColor(shape.color);
+      const quantizedColor = quantizeColor(originalColor);
+      encoder.setColor(quantizedColor);
+      encoder.addPolygon(
+        shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
       );
     }
 

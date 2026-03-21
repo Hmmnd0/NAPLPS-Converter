@@ -17,15 +17,13 @@ Items below are ordered roughly by impact. The "Safe Cleanups" phase is complete
 
 ---
 
-## Phase 2 — Error Handling & Robustness
+## Phase 2 — Error Handling & Robustness ✅ Complete
 
-These are additive-only changes — no risk to working encoding.
-
-- [ ] Show a user-facing error if the uploaded SVG is malformed (DOMParser parse error currently silent)
-- [ ] Show a warning if the SVG has no `<rect>` elements and would produce an empty `.nap`
-- [ ] Validate that image dimensions are > 0 before starting vectorization
-- [ ] Add file size warning before processing very large images (currently silently capped at 1M pixels)
-- [ ] Guard against empty hex string before binary download (currently shows a generic alert)
+- [x] Show a user-facing error if the uploaded SVG is malformed (DOMParser parse error currently silent)
+- [x] Show a warning if the SVG has no `<rect>` elements and would produce an empty `.nap`
+- [x] Validate that image dimensions are > 0 before starting vectorization
+- [x] Add file size warning before processing very large images (currently silently capped at 1M pixels)
+- [x] Guard against empty hex string before binary download (currently shows a generic alert)
 
 ---
 
@@ -33,9 +31,9 @@ These are additive-only changes — no risk to working encoding.
 
 Extends the SVG parser to handle more than just `<rect>` elements. New code paths added alongside existing rect handling — existing conversion pipeline unchanged.
 
-- [ ] Support `<polygon>` and `<polyline>` elements → encode as `SET & POLY FILLED (0x37)`
+- [x] Support `<polygon>` and `<polyline>` elements → encode as `SET & POLY FILLED (0x37)`
 - [ ] Support `<line>` elements → encode as `SET & LINE ABS (0x2A)`
-- [ ] Support `<circle>` / `<ellipse>` elements → approximate as polygon with N sides
+- [x] Support `<circle>` / `<ellipse>` elements → approximate as polygon with N sides
 - [ ] Support `<path>` elements (basic straight-line paths, not curves) → parse `M`, `L`, `Z` commands
 - [ ] Support `<g>` groups with `transform="translate(...)"` — apply offset to child elements
 - [ ] Respect `stroke` attribute in addition to `fill`
@@ -45,7 +43,7 @@ Extends the SVG parser to handle more than just `<rect>` elements. New code path
 ## Phase 4 — Performance (Lower Priority)
 
 - [ ] Move PNG vectorization (`pixelToSvg.ts`) to a Web Worker to fully unblock the UI during large image processing
-- [ ] Rectangle merging at SVG generation stage (currently each pixel is one `<rect>` before the separate optimization pass)
+- [x] Rectangle merging at SVG generation stage (horizontal run-length encoding in `pixelToSvg.ts`; `parseSvgToPixels` updated to read rect dimensions directly)
 
 ---
 

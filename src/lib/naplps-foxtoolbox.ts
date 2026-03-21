@@ -110,6 +110,16 @@ export class NAPLPSFoxtoolboxEncoder {
     }
   }
 
+  // Add an arbitrary filled polygon (N points)
+  addPolygon(points: NAPLPSPoint[]): void {
+    this.data.push(0x37); // SET & POLY FILLED
+    for (const point of points) {
+      const [xh, xl] = packCoordinate12bit(point.x);
+      const [yh, yl] = packCoordinate12bit(point.y);
+      this.data.push(xh, xl, yh, yl);
+    }
+  }
+
   // End the graphics data
   endGraphics(): void {
     this.data.push(0x0F); // SI (Shift In, end of graphics)

@@ -141,18 +141,23 @@ export async function pixelPngToSvg(
         let pixelCount = 0;
         
         for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
+          let x = 0;
+          while (x < width) {
             const idx = (y * width + x) * 4;
-            const r = imageData.data[idx];
-            const g = imageData.data[idx + 1];
-            const b = imageData.data[idx + 2];
-            const a = imageData.data[idx + 3];
-            if (a > 0) {
-              const pal = nearestPaletteColor(r, g, b);
-              const color = `rgb(${pal[0]},${pal[1]},${pal[2]})`;
-              svg += `<rect x="${x}" y="${y}" width="1" height="1" fill="${color}" />`;
-              pixelCount++;
+            if (imageData.data[idx + 3] === 0) { x++; continue; }
+            const pal = nearestPaletteColor(imageData.data[idx], imageData.data[idx + 1], imageData.data[idx + 2]);
+            const color = `rgb(${pal[0]},${pal[1]},${pal[2]})`;
+            let runEnd = x + 1;
+            while (runEnd < width) {
+              const nextIdx = (y * width + runEnd) * 4;
+              if (imageData.data[nextIdx + 3] === 0) break;
+              const nextPal = nearestPaletteColor(imageData.data[nextIdx], imageData.data[nextIdx + 1], imageData.data[nextIdx + 2]);
+              if (nextPal[0] !== pal[0] || nextPal[1] !== pal[1] || nextPal[2] !== pal[2]) break;
+              runEnd++;
             }
+            svg += `<rect x="${x}" y="${y}" width="${runEnd - x}" height="1" fill="${color}" />`;
+            pixelCount += runEnd - x;
+            x = runEnd;
           }
         }
         
@@ -174,19 +179,24 @@ export async function pixelPngToSvg(
       const processChunk = (startY: number) => {
         const endY = Math.min(startY + chunkSize, height);
         for (let y = startY; y < endY; y++) {
-          for (let x = 0; x < width; x++) {
+          let x = 0;
+          while (x < width) {
             const idx = (y * width + x) * 4;
-            const r = imageData.data[idx];
-            const g = imageData.data[idx + 1];
-            const b = imageData.data[idx + 2];
-            const a = imageData.data[idx + 3];
-            if (a > 0) {
-              const pal = nearestPaletteColor(r, g, b);
-              const color = `rgb(${pal[0]},${pal[1]},${pal[2]})`;
-              svg += `<rect x="${x}" y="${y}" width="1" height="1" fill="${color}" />`;
-              pixelCount++;
+            if (imageData.data[idx + 3] === 0) { x++; processedPixels++; continue; }
+            const pal = nearestPaletteColor(imageData.data[idx], imageData.data[idx + 1], imageData.data[idx + 2]);
+            const color = `rgb(${pal[0]},${pal[1]},${pal[2]})`;
+            let runEnd = x + 1;
+            while (runEnd < width) {
+              const nextIdx = (y * width + runEnd) * 4;
+              if (imageData.data[nextIdx + 3] === 0) break;
+              const nextPal = nearestPaletteColor(imageData.data[nextIdx], imageData.data[nextIdx + 1], imageData.data[nextIdx + 2]);
+              if (nextPal[0] !== pal[0] || nextPal[1] !== pal[1] || nextPal[2] !== pal[2]) break;
+              runEnd++;
             }
-            processedPixels++;
+            svg += `<rect x="${x}" y="${y}" width="${runEnd - x}" height="1" fill="${color}" />`;
+            pixelCount += runEnd - x;
+            processedPixels += runEnd - x;
+            x = runEnd;
           }
         }
         // Report progress more frequently

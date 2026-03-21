@@ -84,21 +84,43 @@ export default function Home() {
         const dataUrl = e.target?.result as string;
         setOriginalPreview(dataUrl);
 
-        try {
-          setSvgReady(false);
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Conversion timeout - image may be too large')), 30000);
-          });
-          const svgPromise = pixelPngToSvg(dataUrl, (progress) => {
-            setProcessingProgress(progress);
-          });
-          const result = await Promise.race([svgPromise, timeoutPromise]) as { svg: string, palette: Array<{r:number,g:number,b:number}> };
-          setSvgString(result.svg);
-          setSvgReady(true);
-        } catch (svgErr) {
-          setError('SVG conversion failed: ' + (svgErr instanceof Error ? svgErr.message : String(svgErr)));
-        }
-        setIsProcessing(false);
+        // Pre-check image dimensions before starting the full conversion
+        const imgCheck = new Image();
+        imgCheck.onload = async () => {
+          if (imgCheck.width === 0 || imgCheck.height === 0) {
+            setError('Image has invalid dimensions (0×0). Please upload a valid PNG.');
+            setIsProcessing(false);
+            return;
+          }
+          if (imgCheck.width * imgCheck.height > 1_000_000) {
+            setError(
+              `Image too large: ${imgCheck.width}×${imgCheck.height} = ${(imgCheck.width * imgCheck.height).toLocaleString()} pixels. Maximum is 1,000,000 pixels.`
+            );
+            setIsProcessing(false);
+            return;
+          }
+
+          try {
+            setSvgReady(false);
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Conversion timeout - image may be too large')), 30000);
+            });
+            const svgPromise = pixelPngToSvg(dataUrl, (progress) => {
+              setProcessingProgress(progress);
+            });
+            const result = await Promise.race([svgPromise, timeoutPromise]) as { svg: string, palette: Array<{r:number,g:number,b:number}> };
+            setSvgString(result.svg);
+            setSvgReady(true);
+          } catch (svgErr) {
+            setError('SVG conversion failed: ' + (svgErr instanceof Error ? svgErr.message : String(svgErr)));
+          }
+          setIsProcessing(false);
+        };
+        imgCheck.onerror = () => {
+          setError('Could not load image — file may be corrupt or not a valid PNG.');
+          setIsProcessing(false);
+        };
+        imgCheck.src = dataUrl;
       };
       reader.readAsDataURL(file);
     } catch (err) {
@@ -116,6 +138,11 @@ export default function Home() {
     try {
       const img = new Image();
       img.onload = async () => {
+        if (img.width === 0 || img.height === 0) {
+          setError('Could not determine image dimensions. Please re-upload the image.');
+          setIsNaplpsProcessing(false);
+          return;
+        }
         try {
           const naplps = useFoxtoolboxApproach
             ? await svgToNaplpsFoxtoolbox(svgString, img.width, img.height)
@@ -156,6 +183,14 @@ export default function Home() {
     try {
       const parser = new DOMParser();
       const doc = parser.parseFromString(svgUploadString, 'image/svg+xml');
+
+      const parseError = doc.querySelector('parsererror');
+      if (parseError) {
+        setSvgUploadError('Malformed SVG: ' + (parseError.textContent?.trim().split('\n')[0] ?? 'parse error'));
+        setIsSvgUploadProcessing(false);
+        return;
+      }
+
       const svgEl = doc.querySelector('svg');
       let width = 0, height = 0;
       const viewBox = svgEl?.getAttribute('viewBox');
@@ -328,8 +363,8 @@ export default function Home() {
                     <button
                       onClick={() => {
                         const hex = naplpsData.replace(/\s+/g, '');
-                        if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
-                          alert('Invalid hex string: cannot export binary.');
+                        if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+                          setError('Cannot export binary: NAPLPS data is empty or invalid.');
                           return;
                         }
                         downloadBinary(hexToBytes(hex), 'naplps_output.nap');
@@ -359,96 +394,6 @@ export default function Home() {
                 ) : (
                   <span className="text-gray-400">No NAPLPS data</span>
                 )}
-                {/* Test Files Section */}
-                <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Test Files</h3>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => {
-                        import('@/lib/naplps-spec').then(({ generateTelidonP5TextFile }) => {
-                          downloadBinary(hexToBytes(generateTelidonP5TextFile('HELLO')), 'telidonp5_text_test.nap');
-                        });
-                      }}
-                      className="w-full px-3 py-2 bg-green-700 text-white text-sm rounded-md hover:bg-green-800 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      TelidonP5.js Text Test
-                    </button>
-                    <button
-                      onClick={() => {
-                        import('@/lib/naplps-spec').then(({ generateTelidonP5RectangleFile }) => {
-                          downloadBinary(hexToBytes(generateTelidonP5RectangleFile()), 'telidonp5_rectangle_test.nap');
-                        });
-                      }}
-                      className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      TelidonP5.js Rectangle Test
-                    </button>
-                    <button
-                      onClick={() => {
-                        import('@/lib/naplps-spec').then(({ generateTelidonP5HybridFile }) => {
-                          downloadBinary(hexToBytes(generateTelidonP5HybridFile('HELLO')), 'telidonp5_hybrid_test.nap');
-                        });
-                      }}
-                      className="w-full px-3 py-2 bg-purple-700 text-white text-sm rounded-md hover:bg-purple-800 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      TelidonP5.js Hybrid Test
-                    </button>
-                    <button
-                      onClick={() => {
-                        import('@/lib/naplps-spec').then(({ generateTelidonP5PolygonRectangleFile }) => {
-                          downloadBinary(hexToBytes(generateTelidonP5PolygonRectangleFile()), 'telidonp5_polygon_rectangle_test.nap');
-                        });
-                      }}
-                      className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      TelidonP5.js Polygon Rectangle Test
-                    </button>
-                    <button
-                      className="w-full px-3 py-2 bg-blue-700 text-white text-sm rounded-md hover:bg-blue-800 transition-colors flex items-center justify-center gap-2"
-                      onClick={async () => {
-                        const { generateTelidonP5RectangleFile } = await import('@/lib/naplps-spec');
-                        downloadBinary(hexToBytes(generateTelidonP5RectangleFile()), 'minimal-rectangle.nap');
-                      }}
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      Minimal NAPLPS Rectangle
-                    </button>
-                    <button
-                      className="w-full px-3 py-2 bg-yellow-700 text-white text-sm rounded-md hover:bg-yellow-800 transition-colors flex items-center justify-center gap-2"
-                      onClick={async () => {
-                        const { generateBitTestPolygonNaplps } = await import('@/lib/naplps');
-                        downloadBinary(generateBitTestPolygonNaplps(), 'bit-test-polygon.nap');
-                      }}
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      Bit Test Polygon (Yellow Rectangle)
-                    </button>
-                    <button
-                      className="w-full px-3 py-2 bg-red-700 text-white text-sm rounded-md hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
-                      onClick={async () => {
-                        const { generateNaplpsPolygonFile } = await import('@/lib/naplps');
-                        const points = [
-                          { x: 160, y: 120 },
-                          { x: 480, y: 120 },
-                          { x: 480, y: 360 },
-                          { x: 160, y: 360 },
-                          { x: 160, y: 120 },
-                        ];
-                        downloadBinary(generateNaplpsPolygonFile(points, 0x52), 'custom-rectangle-red.nap');
-                      }}
-                    >
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                      Custom Rectangle (Red)
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2 text-center">
-                    Use these to test the Telidon viewer
-                  </p>
-                </div>
               </div>
             </div>
           </div>
