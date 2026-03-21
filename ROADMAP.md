@@ -27,16 +27,14 @@ Items below are ordered roughly by impact. The "Safe Cleanups" phase is complete
 
 ---
 
-## Phase 3 — SVG Shape Support (Careful)
+## Phase 3 — SVG Shape Support ✅ Complete (for PNG→NAP use case)
 
-Extends the SVG parser to handle more than just `<rect>` elements. New code paths added alongside existing rect handling — existing conversion pipeline unchanged.
+The PNG→SVG pipeline only produces `<rect>` elements. All other shape types (`<line>`, `<path>`, `<g transform>`, `stroke`) are only relevant if uploading hand-authored SVGs — not useful for the core PNG→NAP workflow.
 
 - [x] Support `<polygon>` and `<polyline>` elements → encode as `SET & POLY FILLED (0x37)`
-- [ ] Support `<line>` elements → encode as `SET & LINE ABS (0x2A)`
 - [x] Support `<circle>` / `<ellipse>` elements → approximate as polygon with N sides
-- [ ] Support `<path>` elements (basic straight-line paths, not curves) → parse `M`, `L`, `Z` commands
-- [ ] Support `<g>` groups with `transform="translate(...)"` — apply offset to child elements
-- [ ] Respect `stroke` attribute in addition to `fill`
+- [x] Support `<path>` elements (M/L/H/V/Z, straight lines only) → parse into polygons with collinear point simplification; supports `style="fill:..."` for Inkscape SVGs
+- [~] `<line>`, `<g transform>`, `stroke` — not applicable to PNG→NAP pipeline; deferred to vectorizer project
 
 ---
 
