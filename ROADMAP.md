@@ -44,6 +44,22 @@ Extends the SVG parser to handle more than just `<rect>` elements. New code path
 
 - [ ] Move PNG vectorization (`pixelToSvg.ts`) to a Web Worker to fully unblock the UI during large image processing
 - [x] Rectangle merging at SVG generation stage (horizontal run-length encoding in `pixelToSvg.ts`; `parseSvgToPixels` updated to read rect dimensions directly)
+- [x] Switch rect encoding from 0x37 SET & POLY FILLED (4 points, 17 bytes) to 0x31 RECT FILLED (2 points, 9 bytes) — ~47% file size reduction (55 KB → 28 KB on test image)
+- [x] 2D rectangle merging in `optimizeRectangles()` (vertical then horizontal pass)
+- [x] Sort rects by color + deduplicate `setColor` calls — eliminates redundant color commands
+
+---
+
+## Future Project — NAPLPS Vectorizer
+
+A separate project that builds on this converter's encoder stack to produce period-accurate file sizes from raster images. Key additions:
+
+- **Tesseract.js OCR** — detect text regions, emit NAPLPS 0x22 TEXT commands instead of rasterizing characters
+- **Potrace (JS port)** — per-color region isolation → polygon outlines → `addPolygon()` calls
+- **Text/graphics separation** — route detected text regions to OCR, non-text to Potrace
+- Reuses `naplps-foxtoolbox.ts`, `addPolygon()`, and the viewer stack from this project unchanged
+
+For Telidon-era content (bitmap fonts on solid backgrounds, simple vector graphics), this approach could match period file sizes of 350 B – 1.5 KB.
 
 ---
 

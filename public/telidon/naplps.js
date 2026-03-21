@@ -1080,7 +1080,8 @@ class NapCmd {
         }
 
         // Handle polygon commands (SET & POLY FILLED, etc.)
-        if (this.opcode.id === 'SET & POLY FILLED' || this.opcode.id === 'SET & POLY OUTLINE') {
+        if (this.opcode.id === 'SET & POLY FILLED' || this.opcode.id === 'SET & POLY OUTLINE' ||
+            this.opcode.id === 'RECT FILLED' || this.opcode.id === 'SET & RECT FILLED') {
             console.log('[setPoints] Polygon command detected, processing as packed coordinates');
             
             // For polygon commands, coordinates are packed as 12-bit values

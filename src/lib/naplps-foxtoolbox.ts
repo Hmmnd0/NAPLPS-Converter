@@ -81,31 +81,12 @@ export class NAPLPSFoxtoolboxEncoder {
     }
   }
 
-  // Add a filled rectangle as a polygon (4 points)
+  // Add a filled rectangle using RECT FILLED (0x31) — 2 corner points, 9 bytes vs 17 for polygon
   addFilledRectangle(topLeft: NAPLPSPoint, bottomRight: NAPLPSPoint): void {
-    // Debug coordinates
-    console.log(`[DEBUG] Adding rectangle as polygon: (${topLeft.x.toFixed(3)},${topLeft.y.toFixed(3)}) to (${bottomRight.x.toFixed(3)},${bottomRight.y.toFixed(3)})`);
-    
-    // Set & Poly Filled command (0x37) - NOT rectangle primitive
-    this.data.push(0x37);
-    
-    // Create 4 points for rectangle: topLeft, topRight, bottomRight, bottomLeft
-    const points = [
-      { x: topLeft.x, y: topLeft.y },
-      { x: bottomRight.x, y: topLeft.y },
-      { x: bottomRight.x, y: bottomRight.y },
-      { x: topLeft.x, y: bottomRight.y }
-    ];
-    
-    // Encode each point as two 12-bit coordinates, packed into 6-bit nibbles
-    for (const point of points) {
+    this.data.push(0x31);
+    for (const point of [topLeft, bottomRight]) {
       const [xh, xl] = packCoordinate12bit(point.x);
       const [yh, yl] = packCoordinate12bit(point.y);
-      
-      // Debug coordinate encoding
-      console.log(`[DEBUG] Point (${point.x.toFixed(3)}, ${point.y.toFixed(3)}) -> X:[${xh}, ${xl}] Y:[${yh}, ${yl}]`);
-      
-      // Add coordinate bytes (4 bytes per point)
       this.data.push(xh, xl, yh, yl);
     }
   }

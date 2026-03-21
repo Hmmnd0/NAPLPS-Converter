@@ -180,48 +180,55 @@ function rgbToLab(rgb: NAPLPSColor): { L: number, a: number, b: number } {
   return { L, a, b: b_val };
 }
 
-// Merge adjacent rectangles of the same color
+// Merge adjacent rectangles of the same color using two sorted passes
 function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
-  const optimized: Rectangle[] = [];
-  const merged = new Set<number>();
-
-  for (let i = 0; i < rectangles.length; i++) {
-    if (merged.has(i)) continue;
-
-    const current = rectangles[i];
-
-    for (let j = i + 1; j < rectangles.length; j++) {
-      if (merged.has(j) || rectangles[j].color !== current.color) continue;
-
-      const other = rectangles[j];
-
-      if (current.y === other.y && current.height === other.height) {
-        if (current.x + current.width === other.x) {
-          current.width += other.width;
-          merged.add(j);
-        } else if (other.x + other.width === current.x) {
-          current.x = other.x;
-          current.width += other.width;
-          merged.add(j);
-        }
-      }
-
-      if (current.x === other.x && current.width === other.width) {
-        if (current.y + current.height === other.y) {
-          current.height += other.height;
-          merged.add(j);
-        } else if (other.y + other.height === current.y) {
-          current.y = other.y;
-          current.height += other.height;
-          merged.add(j);
-        }
-      }
-    }
-
-    optimized.push(current);
+  // Pass 1 — vertical: merge strips with same color, x, and width that are on consecutive rows
+  const vertGroups = new Map<string, Rectangle[]>();
+  for (const rect of rectangles) {
+    const key = `${rect.color}:${rect.x}:${rect.width}`;
+    if (!vertGroups.has(key)) vertGroups.set(key, []);
+    vertGroups.get(key)!.push(rect);
   }
 
-  return optimized;
+  const afterVert: Rectangle[] = [];
+  for (const group of vertGroups.values()) {
+    group.sort((a, b) => a.y - b.y);
+    let cur = { ...group[0] };
+    for (let i = 1; i < group.length; i++) {
+      if (cur.y + cur.height === group[i].y) {
+        cur.height += group[i].height;
+      } else {
+        afterVert.push(cur);
+        cur = { ...group[i] };
+      }
+    }
+    afterVert.push(cur);
+  }
+
+  // Pass 2 — horizontal: merge rects with same color, y, and height that are side by side
+  const horizGroups = new Map<string, Rectangle[]>();
+  for (const rect of afterVert) {
+    const key = `${rect.color}:${rect.y}:${rect.height}`;
+    if (!horizGroups.has(key)) horizGroups.set(key, []);
+    horizGroups.get(key)!.push(rect);
+  }
+
+  const result: Rectangle[] = [];
+  for (const group of horizGroups.values()) {
+    group.sort((a, b) => a.x - b.x);
+    let cur = { ...group[0] };
+    for (let i = 1; i < group.length; i++) {
+      if (cur.x + cur.width === group[i].x) {
+        cur.width += group[i].width;
+      } else {
+        result.push(cur);
+        cur = { ...group[i] };
+      }
+    }
+    result.push(cur);
+  }
+
+  return result;
 }
 
 // Scale coordinates to 0–63 NAPLPS grid
@@ -292,17 +299,18 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
 
     const encoder = new NAPLPSFoxtoolboxEncoder();
 
-    for (const rect of rectangles) {
-      const color = parseColor(rect.color);
-      const topLeftX = rect.x / width;
-      const topLeftY = rect.y / height;
-      const bottomRightX = (rect.x + rect.width) / width;
-      const bottomRightY = (rect.y + rect.height) / height;
+    // Sort by color so we minimize setColor calls (one per unique color instead of one per rect)
+    rectangles.sort((a, b) => (a.color < b.color ? -1 : a.color > b.color ? 1 : 0));
 
-      encoder.setColor(color);
+    let lastColorKey = '';
+    for (const rect of rectangles) {
+      if (rect.color !== lastColorKey) {
+        encoder.setColor(parseColor(rect.color));
+        lastColorKey = rect.color;
+      }
       encoder.addFilledRectangle(
-        { x: topLeftX, y: topLeftY },
-        { x: bottomRightX, y: bottomRightY }
+        { x: rect.x / width, y: rect.y / height },
+        { x: (rect.x + rect.width) / width, y: (rect.y + rect.height) / height }
       );
     }
 
