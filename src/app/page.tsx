@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
@@ -236,6 +237,10 @@ export default function Home() {
             This tool analyzes images and converts them to vector graphics primitives used in vintage
             teletext and videotex systems.
           </p>
+          <Link href="/author"
+            className="inline-block mt-3 px-4 py-1.5 bg-gray-800 text-white text-sm rounded hover:bg-gray-700 transition-colors">
+            Authoring Tool (trace shapes manually)
+          </Link>
         </div>
 
         {/* File Upload */}
