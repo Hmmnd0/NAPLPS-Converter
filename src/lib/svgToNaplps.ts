@@ -1,7 +1,35 @@
 import { NAPLPSEncoder, NAPLPSPoint, NAPLPSColor } from './naplps';
 import { NAPLPSFoxtoolboxEncoder } from './naplps-foxtoolbox';
 
-interface Rectangle {
+// Set to true to enable detailed conversion debug logging in the browser console
+const DEBUG_SVG_NAPLPS = false;
+
+// Douglas-Peucker tolerance in SVG coordinate units.
+// 0.5px only removes collinear/redundant points without visibly rounding corners.
+// Raise toward 1.5 to smooth more aggressively (smaller files, more distortion).
+const DP_TOLERANCE = 0.5;
+
+export function dpSimplify(pts: Array<{ x: number; y: number }>, tol: number): Array<{ x: number; y: number }> {
+  if (pts.length <= 2) return pts;
+  const p1 = pts[0], p2 = pts[pts.length - 1];
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  let maxDist = 0, maxIdx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const dist = len === 0
+      ? Math.sqrt((pts[i].x - p1.x) ** 2 + (pts[i].y - p1.y) ** 2)
+      : Math.abs(dy * pts[i].x - dx * pts[i].y + p2.x * p1.y - p2.y * p1.x) / len;
+    if (dist > maxDist) { maxDist = dist; maxIdx = i; }
+  }
+  if (maxDist > tol) {
+    const L = dpSimplify(pts.slice(0, maxIdx + 1), tol);
+    const R = dpSimplify(pts.slice(maxIdx), tol);
+    return [...L.slice(0, -1), ...R];
+  }
+  return [pts[0], pts[pts.length - 1]];
+}
+
+export interface Rectangle {
   x: number;
   y: number;
   width: number;
@@ -9,7 +37,7 @@ interface Rectangle {
   color: string;
 }
 
-interface PolygonShape {
+export interface PolygonShape {
   points: Array<{ x: number; y: number }>;
   color: string;
 }
@@ -17,11 +45,12 @@ interface PolygonShape {
 function parseSvgToPolygons(svgString: string): PolygonShape[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const cssMap = buildCssClassMap(doc);
   const shapes: PolygonShape[] = [];
 
   doc.querySelectorAll('polygon, polyline').forEach(el => {
     const pointsAttr = el.getAttribute('points') || '';
-    const color = el.getAttribute('fill') || '#000000';
+    const color = resolveFill(el, cssMap);
     const nums = pointsAttr.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
     if (nums.length < 4) return; // need at least 2 points
     const points: Array<{ x: number; y: number }> = [];
@@ -46,13 +75,14 @@ function ellipseToPolygonPoints(cx: number, cy: number, rx: number, ry: number, 
 function parseSvgToCirclesAndEllipses(svgString: string): PolygonShape[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const cssMap = buildCssClassMap(doc);
   const shapes: PolygonShape[] = [];
 
   doc.querySelectorAll('circle').forEach(el => {
     const cx = parseFloat(el.getAttribute('cx') || '0');
     const cy = parseFloat(el.getAttribute('cy') || '0');
     const r  = parseFloat(el.getAttribute('r')  || '0');
-    const color = el.getAttribute('fill') || '#000000';
+    const color = resolveFill(el, cssMap);
     if (r <= 0) return;
     shapes.push({ points: ellipseToPolygonPoints(cx, cy, r, r), color });
   });
@@ -62,12 +92,231 @@ function parseSvgToCirclesAndEllipses(svgString: string): PolygonShape[] {
     const cy = parseFloat(el.getAttribute('cy') || '0');
     const rx = parseFloat(el.getAttribute('rx') || '0');
     const ry = parseFloat(el.getAttribute('ry') || '0');
-    const color = el.getAttribute('fill') || '#000000';
+    const color = resolveFill(el, cssMap);
     if (rx <= 0 || ry <= 0) return;
     shapes.push({ points: ellipseToPolygonPoints(cx, cy, rx, ry), color });
   });
 
   return shapes;
+}
+
+// Tokenize a path `d` attribute into [command, ...args] tuples
+export function tokenizePathD(d: string): Array<[string, number[]]> {
+  // Split on command letters, keeping the letter
+  const tokens = d.trim().match(/[MLHVZmlhvz][^MLHVZmlhvz]*/g) ?? [];
+  return tokens.map(token => {
+    const cmd = token[0];
+    const nums = token.slice(1).trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n));
+    return [cmd, nums];
+  });
+}
+
+// Build a map of CSS class name → fill color from <style> blocks in the SVG document.
+// Illustrator exports use this pattern: .st0{fill:#FF8C00;} applied via class="st0".
+export function buildCssClassMap(doc: Document): Map<string, string> {
+  const map = new Map<string, string>();
+  doc.querySelectorAll('style').forEach(styleEl => {
+    const text = styleEl.textContent ?? '';
+    // Match .className { ... fill: #hex or rgb(...) ... }
+    const ruleRe = /\.([a-zA-Z0-9_-]+)\s*\{([^}]*)\}/g;
+    let match: RegExpExecArray | null;
+    while ((match = ruleRe.exec(text)) !== null) {
+      const className = match[1];
+      const body = match[2];
+      const fillMatch = body.match(/fill\s*:\s*([^;}\s]+)/);
+      if (fillMatch) map.set(className, fillMatch[1].trim());
+    }
+  });
+  if (DEBUG_SVG_NAPLPS && map.size > 0) console.log(`[svgToNaplps] CSS class fills found:`, Object.fromEntries(map));
+  return map;
+}
+
+// Walk up the DOM to find the nearest fill color, checking inline attributes,
+// CSS class map (for Illustrator exports), and parent elements.
+export function resolveFill(el: Element, cssMap: Map<string, string>): string {
+  let node: Element | null = el;
+  while (node) {
+    // 1. Inline fill attribute
+    const fill = node.getAttribute('fill');
+    if (fill && fill !== 'inherit') return fill.trim();
+    // 2. Inline style attribute
+    const styleFill = node.getAttribute('style')?.match(/fill:\s*([^;]+)/)?.[1];
+    if (styleFill) return styleFill.trim();
+    // 3. CSS class map (Illustrator .stN classes)
+    const classes = (node.getAttribute('class') ?? '').split(/\s+/);
+    for (const cls of classes) {
+      const mapped = cssMap.get(cls);
+      if (mapped) return mapped;
+    }
+    node = node.parentElement;
+  }
+  return '#000000';
+}
+
+// If 4 points form an axis-aligned rectangle, return it as a Rectangle; otherwise null.
+export function extractRectIfAxisAligned(points: Array<{ x: number; y: number }>, color: string): Rectangle | null {
+  if (points.length !== 4) return null;
+  const xs = points.map(p => p.x);
+  const ys = points.map(p => p.y);
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  if (xMax <= xMin || yMax <= yMin) return null;
+  const tol = 0.5; // pixel tolerance for floating-point imprecision
+  const allAtCorners = points.every(p =>
+    (Math.abs(p.x - xMin) < tol || Math.abs(p.x - xMax) < tol) &&
+    (Math.abs(p.y - yMin) < tol || Math.abs(p.y - yMax) < tol)
+  );
+  if (!allAtCorners) return null;
+  return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin, color };
+}
+
+// Parse SVG <path> elements into rects (axis-aligned 4-point paths) and polygons.
+// Handles: M/m (moveto), L/l (lineto), H/h (horiz), V/v (vert), Z/z (close)
+export function parseSvgToPaths(svgString: string): { rects: Rectangle[], polygons: PolygonShape[] } {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const cssMap = buildCssClassMap(doc);
+  const rects: Rectangle[] = [];
+  const shapes: PolygonShape[] = [];
+
+  const pathEls = doc.querySelectorAll('path');
+  if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] <path> elements found: ${pathEls.length}`);
+
+  pathEls.forEach((el, elIdx) => {
+    const d = el.getAttribute('d') ?? '';
+    const rawColor = resolveFill(el, cssMap);
+    if (!d) {
+      if (DEBUG_SVG_NAPLPS) console.warn(`[svgToNaplps] path[${elIdx}] has empty d attribute, skipping`);
+      return;
+    }
+    if (rawColor === 'none') {
+      if (DEBUG_SVG_NAPLPS) console.warn(`[svgToNaplps] path[${elIdx}] fill:none, skipping`);
+      return;
+    }
+    const color = rawColor;
+
+    const commands = tokenizePathD(d);
+    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] color=${color} commands:`, commands.map(([c, a]) => `${c}(${a.join(',')})`).join(' '));
+
+    // Walk commands, building subpaths
+    let cx = 0, cy = 0;           // current point
+    let subpathStart = { x: 0, y: 0 };
+    let currentPoints: Array<{ x: number; y: number }> = [];
+    const skippedCommands: string[] = [];
+    let subpathsEmitted = 0;
+
+    const emitSubpath = (reason: string) => {
+      if (currentPoints.length >= 3) {
+        const rect = extractRectIfAxisAligned(currentPoints, color);
+        if (rect) {
+          rects.push(rect);
+          if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}): 4 axis-aligned pts → rect x=${rect.x} y=${rect.y} w=${rect.width} h=${rect.height}`);
+        } else {
+          shapes.push({ points: [...currentPoints], color });
+          if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}): ${currentPoints.length} points → polygon #${shapes.length}`);
+        }
+        subpathsEmitted++;
+      } else if (currentPoints.length > 0) {
+        if (DEBUG_SVG_NAPLPS) console.warn(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}) but only ${currentPoints.length} point(s) — skipped (need ≥3)`);
+      }
+      currentPoints = [];
+    };
+
+    for (const [cmd, args] of commands) {
+      switch (cmd) {
+        case 'M': {
+          // Close any open subpath before starting a new one
+          if (currentPoints.length > 0) emitSubpath('new M');
+          cx = args[0]; cy = args[1];
+          subpathStart = { x: cx, y: cy };
+          currentPoints = [{ x: cx, y: cy }];
+          // Subsequent pairs after the first M are implicit L
+          for (let i = 2; i + 1 < args.length; i += 2) {
+            cx = args[i]; cy = args[i + 1];
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'm': {
+          if (currentPoints.length > 0) emitSubpath('new m');
+          cx += args[0]; cy += args[1];
+          subpathStart = { x: cx, y: cy };
+          currentPoints = [{ x: cx, y: cy }];
+          for (let i = 2; i + 1 < args.length; i += 2) {
+            cx += args[i]; cy += args[i + 1];
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'L': {
+          for (let i = 0; i + 1 < args.length; i += 2) {
+            cx = args[i]; cy = args[i + 1];
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'l': {
+          for (let i = 0; i + 1 < args.length; i += 2) {
+            cx += args[i]; cy += args[i + 1];
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'H': {
+          for (const x of args) {
+            cx = x;
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'h': {
+          for (const dx of args) {
+            cx += dx;
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'V': {
+          for (const y of args) {
+            cy = y;
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'v': {
+          for (const dy of args) {
+            cy += dy;
+            currentPoints.push({ x: cx, y: cy });
+          }
+          break;
+        }
+        case 'Z':
+        case 'z': {
+          cx = subpathStart.x; cy = subpathStart.y;
+          emitSubpath('Z');
+          break;
+        }
+        default: {
+          if (!skippedCommands.includes(cmd)) skippedCommands.push(cmd);
+          break;
+        }
+      }
+    }
+
+    // Emit any unclosed trailing subpath
+    if (currentPoints.length >= 3) {
+      if (DEBUG_SVG_NAPLPS) console.warn(`[svgToNaplps] path[${elIdx}] has unclosed subpath (no Z) — emitting anyway (${currentPoints.length} pts)`);
+      emitSubpath('end-of-path');
+    }
+
+    if (skippedCommands.length > 0) {
+      console.warn(`[svgToNaplps] path[${elIdx}] unsupported commands skipped: ${skippedCommands.join(', ')} — consider converting curves to polylines in your SVG editor`);
+    }
+    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] → ${subpathsEmitted} shape(s) emitted`);
+  });
+
+  if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] parseSvgToPaths: ${rects.length} rects, ${shapes.length} polygons`);
+  return { rects, polygons: shapes };
 }
 
 // Telidon 16-color palette (exact values from Telidon specification)
@@ -100,6 +349,7 @@ function parseSvgToPixels(svgString: string): Rectangle[] {
     throw new Error('Malformed SVG: ' + (parseError.textContent?.trim().split('\n')[0] ?? 'parse error'));
   }
 
+  const cssMap = buildCssClassMap(doc);
   const rects = doc.querySelectorAll('rect');
   const rectangles: Rectangle[] = [];
   rects.forEach(rect => {
@@ -107,7 +357,7 @@ function parseSvgToPixels(svgString: string): Rectangle[] {
     const y      = parseInt(rect.getAttribute('y')      || '0');
     const width  = parseInt(rect.getAttribute('width')  || '1');
     const height = parseInt(rect.getAttribute('height') || '1');
-    const color  = rect.getAttribute('fill') || '#000000';
+    const color  = resolveFill(rect, cssMap);
     rectangles.push({ x, y, width, height, color });
   });
 
@@ -115,7 +365,7 @@ function parseSvgToPixels(svgString: string): Rectangle[] {
 }
 
 
-function parseColor(color: string): NAPLPSColor {
+export function parseColor(color: string): NAPLPSColor {
   const rgbMatch = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/i);
   if (rgbMatch) {
     return {
@@ -180,9 +430,9 @@ function rgbToLab(rgb: NAPLPSColor): { L: number, a: number, b: number } {
   return { L, a, b: b_val };
 }
 
-// Merge adjacent rectangles of the same color using two sorted passes
-function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
-  // Pass 1 — vertical: merge strips with same color, x, and width that are on consecutive rows
+// Single vertical+horizontal merge pass
+function mergeOnce(rectangles: Rectangle[]): Rectangle[] {
+  // Pass 1 — vertical: same color, x, width — adjacent rows
   const vertGroups = new Map<string, Rectangle[]>();
   for (const rect of rectangles) {
     const key = `${rect.color}:${rect.x}:${rect.width}`;
@@ -205,7 +455,7 @@ function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
     afterVert.push(cur);
   }
 
-  // Pass 2 — horizontal: merge rects with same color, y, and height that are side by side
+  // Pass 2 — horizontal: same color, y, height — adjacent columns
   const horizGroups = new Map<string, Rectangle[]>();
   for (const rect of afterVert) {
     const key = `${rect.color}:${rect.y}:${rect.height}`;
@@ -229,6 +479,17 @@ function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
   }
 
   return result;
+}
+
+// Iteratively merge until no further reduction (each pass can unlock new merges)
+export function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
+  let cur = rectangles;
+  let prev = Infinity;
+  while (cur.length < prev) {
+    prev = cur.length;
+    cur = mergeOnce(cur);
+  }
+  return cur;
 }
 
 // Scale coordinates to 0–63 NAPLPS grid
@@ -289,12 +550,26 @@ export async function svgToNaplps(svgString: string, width: number, height: numb
 export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, height: number): Promise<string> {
   try {
     let rectangles = parseSvgToPixels(svgString);
-    rectangles = optimizeRectangles(rectangles);
+    const rectsBefore = rectangles.length;
     const polygons = parseSvgToPolygons(svgString);
     const circles  = parseSvgToCirclesAndEllipses(svgString);
+    const { rects: pathRects, polygons: paths } = parseSvgToPaths(svgString);
+    // Merge all rects together (native + recovered from paths) in one pass
+    rectangles = optimizeRectangles([...rectangles, ...pathRects]);
 
-    if (rectangles.length === 0 && polygons.length === 0 && circles.length === 0) {
-      throw new Error('SVG contains no supported shapes (<rect>, <polygon>, <polyline>, <circle>, <ellipse>) — output would be empty.');
+    if (DEBUG_SVG_NAPLPS) {
+      console.log('[svgToNaplps] shape counts:', {
+        rects_raw: rectsBefore,
+        rects_from_paths: pathRects.length,
+        rects_merged: rectangles.length,
+        polygons: polygons.length,
+        circles_ellipses: circles.length,
+        path_polygons: paths.length,
+      });
+    }
+
+    if (rectangles.length === 0 && polygons.length === 0 && circles.length === 0 && paths.length === 0) {
+      throw new Error('SVG contains no supported shapes (<rect>, <polygon>, <polyline>, <circle>, <ellipse>, <path>) — output would be empty.');
     }
 
     const encoder = new NAPLPSFoxtoolboxEncoder();
@@ -314,22 +589,45 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
       );
     }
 
+    let totalPointsBefore = 0, totalPointsAfter = 0;
+
     for (const shape of polygons) {
+      const simplified = dpSimplify(shape.points, DP_TOLERANCE);
+      if (DEBUG_SVG_NAPLPS) {
+        totalPointsBefore += shape.points.length;
+        totalPointsAfter += simplified.length;
+        console.log(`[svgToNaplps] polygon: color=${shape.color} pts ${shape.points.length}→${simplified.length}`);
+      }
+      if (simplified.length < 3) continue;
       encoder.setColor(parseColor(shape.color));
-      encoder.addPolygon(
-        shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
-      );
+      encoder.addPolygon(simplified.map(p => ({ x: p.x / width, y: p.y / height })));
     }
 
     for (const shape of circles) {
+      // Circles are already 24-point approximations — no simplification needed
+      if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] circle/ellipse: color=${shape.color} points=${shape.points.length}`);
       encoder.setColor(parseColor(shape.color));
-      encoder.addPolygon(
-        shape.points.map(p => ({ x: p.x / width, y: p.y / height }))
-      );
+      encoder.addPolygon(shape.points.map(p => ({ x: p.x / width, y: p.y / height })));
     }
 
+    for (const shape of paths) {
+      const simplified = dpSimplify(shape.points, DP_TOLERANCE);
+      if (DEBUG_SVG_NAPLPS) {
+        totalPointsBefore += shape.points.length;
+        totalPointsAfter += simplified.length;
+        console.log(`[svgToNaplps] path polygon: color=${shape.color} pts ${shape.points.length}→${simplified.length}`);
+      }
+      if (simplified.length < 3) continue;
+      encoder.setColor(parseColor(shape.color));
+      encoder.addPolygon(simplified.map(p => ({ x: p.x / width, y: p.y / height })));
+    }
+
+    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] polygon points total: ${totalPointsBefore} → ${totalPointsAfter} (${((1 - totalPointsAfter / totalPointsBefore) * 100).toFixed(1)}% reduction)`);
+
     encoder.endGraphics();
-    return encoder.getHexString();
+    const hexResult = encoder.getHexString();
+    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] output bytes: ${hexResult.length / 2}`);
+    return hexResult;
   } catch (error) {
     console.error('Error in svgToNaplpsFoxtoolbox:', error);
     throw error;

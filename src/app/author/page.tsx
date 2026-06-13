@@ -141,35 +141,6 @@ async function importShapesFromSvg(file: File): Promise<Shape[]> {
   return results.map(r => r.shape);
 }
 
-// ── Color select (non-contiguous: all pixels matching sampled color) ──────────
-
-function colorSelect(
-  data: Uint8ClampedArray, width: number, height: number,
-  startX: number, startY: number, tolerance: number
-): FillResult | null {
-  const si = (startY * width + startX) * 4;
-  const tr = data[si], tg = data[si + 1], tb = data[si + 2];
-  if (data[si + 3] === 0) return null;
-
-  const mask = new Uint8Array(width * height);
-  let x1 = width, y1 = height, x2 = -1, y2 = -1;
-
-  for (let i = 0; i < width * height; i++) {
-    const pi = i * 4;
-    if (data[pi + 3] === 0) continue;
-    const dr = data[pi] - tr, dg = data[pi + 1] - tg, db = data[pi + 2] - tb;
-    if (Math.sqrt(dr * dr + dg * dg + db * db) <= tolerance) {
-      mask[i] = 1;
-      const px = i % width, py = Math.floor(i / width);
-      if (px < x1) x1 = px; if (px > x2) x2 = px;
-      if (py < y1) y1 = py; if (py > y2) y2 = py;
-    }
-  }
-
-  if (x2 === -1) return null;
-  return { mask, x1, y1, x2, y2, r: tr, g: tg, b: tb };
-}
-
 // ── Flood fill ────────────────────────────────────────────────────────────────
 
 function floodFill(

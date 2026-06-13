@@ -45,6 +45,16 @@ The PNG→SVG pipeline only produces `<rect>` elements. All other shape types (`
 - [x] Switch rect encoding from 0x37 SET & POLY FILLED (4 points, 17 bytes) to 0x31 RECT FILLED (2 points, 9 bytes) — ~47% file size reduction (55 KB → 28 KB on test image)
 - [x] 2D rectangle merging in `optimizeRectangles()` (vertical then horizontal pass)
 - [x] Sort rects by color + deduplicate `setColor` calls — eliminates redundant color commands
+- [x] `optimizeRectangles()` now iterates merge passes until no further reduction (a horizontal merge can unlock a new vertical one)
+
+---
+
+## Phase 5 — Testing & Maintenance ✅ Complete
+
+- [x] Vitest test suite (`src/lib/svgToNaplps.test.ts`, jsdom env) — 26 tests covering the pure conversion logic: path tokenizer, color parsing, axis-aligned rect detection, Douglas–Peucker simplification, iterative rectangle merging, `<path>` → rect/polygon parsing, and SVG fill resolution (inline / style / CSS class / `<g>` inheritance). Run with `npm test`.
+- [x] Removed dead code: `imageProcessor.ts`, `naplps-spec.ts`, `svgVectorizer.ts`, `imagetracerjs.d.ts` (~690 unimported lines) and the unused author-tool `colorSelect()` helper.
+- [x] Dropped unused dependencies: `imagetracerjs`, `jimp`, `@types/jimp`.
+- [x] Disabled the `DEBUG_SVG_NAPLPS` console-logging flag (was left on) and fixed outstanding lint errors.
 
 ---
 
