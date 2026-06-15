@@ -491,10 +491,12 @@ export default function Home() {
           )}
         </div>
 
-        {/* SVG Accuracy Test */}
-        <div className="mt-8">
-          <SvgAccuracyTest />
-        </div>
+        {/* SVG Accuracy Test — dev-only diagnostic panel, omitted from production builds */}
+        {process.env.NODE_ENV !== 'production' && (
+          <div className="mt-8">
+            <SvgAccuracyTest />
+          </div>
+        )}
 
         {/* Information */}
         <div className="mt-12 bg-white p-6 rounded-lg shadow-sm">

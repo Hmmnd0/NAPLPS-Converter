@@ -106,15 +106,99 @@ function parseSvgToCirclesAndEllipses(doc: Document, cssMap: Map<string, string>
   return shapes;
 }
 
-// Tokenize a path `d` attribute into [command, ...args] tuples
+// Tokenize a path `d` attribute into [command, ...args] tuples.
+// Recognizes line commands (M/L/H/V/Z) and curve commands (C/S/Q/T/A).
+// Numbers are extracted with a tolerant regex so terse forms like "10-5"
+// (implicit separator) and "1.5.5" (two coordinates) parse correctly.
 export function tokenizePathD(d: string): Array<[string, number[]]> {
-  // Split on command letters, keeping the letter
-  const tokens = d.trim().match(/[MLHVZmlhvz][^MLHVZmlhvz]*/g) ?? [];
+  const tokens = d.trim().match(/[MLHVZCSQTAmlhvzcsqta][^MLHVZCSQTAmlhvzcsqta]*/g) ?? [];
   return tokens.map(token => {
     const cmd = token[0];
-    const nums = token.slice(1).trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n));
+    const nums = (token.slice(1).match(/-?\d*\.?\d+(?:[eE][+-]?\d+)?/g) ?? []).map(Number);
     return [cmd, nums];
   });
+}
+
+// ── Curve flattening ──────────────────────────────────────────────────────────
+// Segments per curve. We oversample; the Douglas–Peucker pass downstream then
+// collapses near-collinear points, so flat regions stay cheap while tight bends
+// keep enough detail.
+const CURVE_SEGMENTS = 16;
+type XY = { x: number; y: number };
+
+// Cubic Bézier — returns sampled points excluding the start, including the end.
+function sampleCubic(p0: XY, c1: XY, c2: XY, p1: XY, n = CURVE_SEGMENTS): XY[] {
+  const pts: XY[] = [];
+  for (let k = 1; k <= n; k++) {
+    const t = k / n, u = 1 - t;
+    const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    pts.push({
+      x: a * p0.x + b * c1.x + c * c2.x + d * p1.x,
+      y: a * p0.y + b * c1.y + c * c2.y + d * p1.y,
+    });
+  }
+  return pts;
+}
+
+// Quadratic Bézier.
+function sampleQuad(p0: XY, c: XY, p1: XY, n = CURVE_SEGMENTS): XY[] {
+  const pts: XY[] = [];
+  for (let k = 1; k <= n; k++) {
+    const t = k / n, u = 1 - t;
+    const a = u * u, b = 2 * u * t, d = t * t;
+    pts.push({ x: a * p0.x + b * c.x + d * p1.x, y: a * p0.y + b * c.y + d * p1.y });
+  }
+  return pts;
+}
+
+// Elliptical arc (SVG endpoint parameterization → center, then sample).
+function sampleArc(
+  p0: XY, rx: number, ry: number, xAxisDeg: number,
+  largeArc: boolean, sweep: boolean, p1: XY, n = CURVE_SEGMENTS,
+): XY[] {
+  if (rx === 0 || ry === 0) return [p1]; // degenerate → straight line
+  rx = Math.abs(rx); ry = Math.abs(ry);
+  const phi = (xAxisDeg * Math.PI) / 180;
+  const cosP = Math.cos(phi), sinP = Math.sin(phi);
+
+  const dx = (p0.x - p1.x) / 2, dy = (p0.y - p1.y) / 2;
+  const x1p = cosP * dx + sinP * dy;
+  const y1p = -sinP * dx + cosP * dy;
+
+  // Correct radii if too small to span the endpoints.
+  const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+  if (lambda > 1) { const s = Math.sqrt(lambda); rx *= s; ry *= s; }
+
+  const sign = largeArc !== sweep ? 1 : -1;
+  const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+  const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  const co = sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx * y1p) / ry;
+  const cyp = (-co * ry * x1p) / rx;
+
+  const cx = cosP * cxp - sinP * cyp + (p0.x + p1.x) / 2;
+  const cy = sinP * cxp + cosP * cyp + (p0.y + p1.y) / 2;
+
+  const ang = (ux: number, uy: number, vx: number, vy: number) => {
+    const dot = ux * vx + uy * vy;
+    const len = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    let a = Math.acos(Math.max(-1, Math.min(1, dot / len)));
+    if (ux * vy - uy * vx < 0) a = -a;
+    return a;
+  };
+  const theta1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let dTheta = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (!sweep && dTheta > 0) dTheta -= 2 * Math.PI;
+  if (sweep && dTheta < 0) dTheta += 2 * Math.PI;
+
+  const pts: XY[] = [];
+  for (let k = 1; k <= n; k++) {
+    const theta = theta1 + (dTheta * k) / n;
+    const x = cx + rx * Math.cos(theta) * cosP - ry * Math.sin(theta) * sinP;
+    const y = cy + rx * Math.cos(theta) * sinP + ry * Math.sin(theta) * cosP;
+    pts.push({ x, y });
+  }
+  return pts;
 }
 
 // Build a map of CSS class name → fill color from <style> blocks in the SVG document.
@@ -207,6 +291,10 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
     let currentPoints: Array<{ x: number; y: number }> = [];
     const skippedCommands: string[] = [];
     let subpathsEmitted = 0;
+    // Last cubic/quadratic control points (absolute), for S/T smooth reflection.
+    // Non-null only while the previous command was the matching curve type.
+    let prevCubicCtrl: XY | null = null;
+    let prevQuadCtrl: XY | null = null;
 
     const emitSubpath = (reason: string) => {
       if (currentPoints.length >= 3) {
@@ -225,7 +313,13 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
       currentPoints = [];
     };
 
+    const pushPts = (pts: XY[]) => { for (const p of pts) currentPoints.push(p); };
+
     for (const [cmd, args] of commands) {
+      // Any non-cubic command clears the cubic reflection point, and vice versa.
+      if (!'CcSs'.includes(cmd)) prevCubicCtrl = null;
+      if (!'QqTt'.includes(cmd)) prevQuadCtrl = null;
+
       switch (cmd) {
         case 'M': {
           // Close any open subpath before starting a new one
@@ -293,6 +387,64 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
           }
           break;
         }
+        case 'C': case 'c': {
+          const rel = cmd === 'c';
+          for (let i = 0; i + 5 < args.length; i += 6) {
+            const c1 = { x: (rel ? cx : 0) + args[i],     y: (rel ? cy : 0) + args[i + 1] };
+            const c2 = { x: (rel ? cx : 0) + args[i + 2], y: (rel ? cy : 0) + args[i + 3] };
+            const end = { x: (rel ? cx : 0) + args[i + 4], y: (rel ? cy : 0) + args[i + 5] };
+            pushPts(sampleCubic({ x: cx, y: cy }, c1, c2, end));
+            cx = end.x; cy = end.y; prevCubicCtrl = c2;
+          }
+          break;
+        }
+        case 'S': case 's': {
+          const rel = cmd === 's';
+          for (let i = 0; i + 3 < args.length; i += 4) {
+            const c1: XY = prevCubicCtrl
+              ? { x: 2 * cx - prevCubicCtrl.x, y: 2 * cy - prevCubicCtrl.y }
+              : { x: cx, y: cy };
+            const c2 = { x: (rel ? cx : 0) + args[i],     y: (rel ? cy : 0) + args[i + 1] };
+            const end = { x: (rel ? cx : 0) + args[i + 2], y: (rel ? cy : 0) + args[i + 3] };
+            pushPts(sampleCubic({ x: cx, y: cy }, c1, c2, end));
+            cx = end.x; cy = end.y; prevCubicCtrl = c2;
+          }
+          break;
+        }
+        case 'Q': case 'q': {
+          const rel = cmd === 'q';
+          for (let i = 0; i + 3 < args.length; i += 4) {
+            const c = { x: (rel ? cx : 0) + args[i],     y: (rel ? cy : 0) + args[i + 1] };
+            const end = { x: (rel ? cx : 0) + args[i + 2], y: (rel ? cy : 0) + args[i + 3] };
+            pushPts(sampleQuad({ x: cx, y: cy }, c, end));
+            cx = end.x; cy = end.y; prevQuadCtrl = c;
+          }
+          break;
+        }
+        case 'T': case 't': {
+          const rel = cmd === 't';
+          for (let i = 0; i + 1 < args.length; i += 2) {
+            const c: XY = prevQuadCtrl
+              ? { x: 2 * cx - prevQuadCtrl.x, y: 2 * cy - prevQuadCtrl.y }
+              : { x: cx, y: cy };
+            const end = { x: (rel ? cx : 0) + args[i], y: (rel ? cy : 0) + args[i + 1] };
+            pushPts(sampleQuad({ x: cx, y: cy }, c, end));
+            cx = end.x; cy = end.y; prevQuadCtrl = c;
+          }
+          break;
+        }
+        case 'A': case 'a': {
+          const rel = cmd === 'a';
+          for (let i = 0; i + 6 < args.length; i += 7) {
+            const end = { x: (rel ? cx : 0) + args[i + 5], y: (rel ? cy : 0) + args[i + 6] };
+            pushPts(sampleArc(
+              { x: cx, y: cy }, args[i], args[i + 1], args[i + 2],
+              args[i + 3] !== 0, args[i + 4] !== 0, end,
+            ));
+            cx = end.x; cy = end.y;
+          }
+          break;
+        }
         case 'Z':
         case 'z': {
           cx = subpathStart.x; cy = subpathStart.y;
@@ -313,7 +465,7 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
     }
 
     if (skippedCommands.length > 0) {
-      console.warn(`[svgToNaplps] path[${elIdx}] unsupported commands skipped: ${skippedCommands.join(', ')} — consider converting curves to polylines in your SVG editor`);
+      console.warn(`[svgToNaplps] path[${elIdx}] unsupported commands skipped: ${skippedCommands.join(', ')}`);
     }
     if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] → ${subpathsEmitted} shape(s) emitted`);
   });
@@ -641,10 +793,17 @@ export function getConversionStats(svgString: string): {
   const { doc, cssMap } = parseSvgDocument(svgString);
   const totalPixels = doc.querySelectorAll('rect').length;
 
-  const rectangles = parseSvgToPixels(doc, cssMap);
-  const totalRectangles = rectangles.length;
+  // Count every shape the encoder will emit, not just native <rect>s: rects
+  // recovered from <path>, plus polygons / circles / path-polygons.
+  const { rects: pathRects, polygons: pathPolys } = parseSvgToPaths(doc, cssMap);
+  const allRects = [...parseSvgToPixels(doc, cssMap), ...pathRects];
+  const otherShapes =
+    parseSvgToPolygons(doc, cssMap).length +
+    parseSvgToCirclesAndEllipses(doc, cssMap).length +
+    pathPolys.length;
 
-  const optimizedRectangles = optimizeRectangles(rectangles).length;
+  const totalRectangles = allRects.length + otherShapes;                  // before rect merge
+  const optimizedRectangles = optimizeRectangles(allRects).length + otherShapes; // what gets encoded
 
   const compressionRatio = totalPixels > 0 ? totalRectangles / totalPixels : 0;
   const optimizationRatio = totalRectangles > 0 ? optimizedRectangles / totalRectangles : 0;

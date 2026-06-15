@@ -33,8 +33,10 @@ The PNG→SVG pipeline only produces `<rect>` elements. All other shape types (`
 
 - [x] Support `<polygon>` and `<polyline>` elements → encode as `SET & POLY FILLED (0x37)`
 - [x] Support `<circle>` / `<ellipse>` elements → approximate as polygon with N sides
-- [x] Support `<path>` elements (M/L/H/V/Z, straight lines only) → parse into polygons with collinear point simplification; supports `style="fill:..."` for Inkscape SVGs
-- [~] `<line>`, `<g transform>`, `stroke` — not applicable to PNG→NAP pipeline; deferred to vectorizer project
+- [x] Support `<path>` elements (M/L/H/V/Z, straight lines) → axis-aligned 4-pt subpaths become rects, others become polygons; collinear-point (Douglas–Peucker) simplification
+- [x] Support `<path>` curves (C/S/Q/T/A) → Bézier/arc flattening into oversampled polylines, then DP-simplified; verified rendering in TelidonP5 (heart via cubics, circle via arcs)
+- [x] Fill resolution: inline `fill`, inline `style`, CSS-class `<style>` blocks (Illustrator `.stN`), and `<g>` ancestor inheritance
+- [~] `<line>`, `<g transform>` coordinate offset, `stroke` — deferred (TEXT 0x22 / LINE 0x2A are the remaining new encoder primitives)
 
 ---
 
@@ -52,9 +54,15 @@ The PNG→SVG pipeline only produces `<rect>` elements. All other shape types (`
 ## Phase 5 — Testing & Maintenance ✅ Complete
 
 - [x] Vitest test suite (`src/lib/svgToNaplps.test.ts`, jsdom env) — 26 tests covering the pure conversion logic: path tokenizer, color parsing, axis-aligned rect detection, Douglas–Peucker simplification, iterative rectangle merging, `<path>` → rect/polygon parsing, and SVG fill resolution (inline / style / CSS class / `<g>` inheritance). Run with `npm test`.
-- [x] Removed dead code: `imageProcessor.ts`, `naplps-spec.ts`, `svgVectorizer.ts`, `imagetracerjs.d.ts` (~690 unimported lines) and the unused author-tool `colorSelect()` helper.
+- [x] Removed dead code: `imageProcessor.ts`, `naplps-spec.ts`, `svgVectorizer.ts`, `imagetracerjs.d.ts` (~690 unimported lines), the unused author-tool `colorSelect()` helper, the unused `NAPLPSViewer.tsx` component, and 3 unused `generate*` helpers in `naplps-foxtoolbox.ts`.
 - [x] Dropped unused dependencies: `imagetracerjs`, `jimp`, `@types/jimp`.
 - [x] Disabled the `DEBUG_SVG_NAPLPS` console-logging flag (was left on) and fixed outstanding lint errors.
+- [x] Parse each SVG once per conversion (`parseSvgDocument`) instead of 5×; share the Document + CSS-fill map across all extractors.
+- [x] In-repo NAPLPS decoder (`naplps-decoder.ts`) — inverse of the foxtoolbox encoder; powers encode→decode→compare round-trip tests and `.nap` inspection.
+- [x] Deduplicated `NAPLPSPoint`/`NAPLPSColor` to a single definition in `naplps.ts`.
+- [x] `getConversionStats` now counts all emitted shapes (path rects, polygons, circles), not just native `<rect>`.
+- [x] Dev-gated the `SvgAccuracyTest` diagnostic panel out of production builds.
+- [x] GitHub Actions CI (`.github/workflows/ci.yml`): typecheck + lint + test + build on push/PR.
 
 ---
 

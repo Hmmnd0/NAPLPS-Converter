@@ -47,8 +47,52 @@ describe('tokenizePathD', () => {
     ]);
   });
 
+  it('recognizes curve commands (C/S/Q/T/A)', () => {
+    expect(tokenizePathD('M0 0 C1 2 3 4 5 6')).toEqual([['M', [0, 0]], ['C', [1, 2, 3, 4, 5, 6]]]);
+    expect(tokenizePathD('M0 0 A5 5 0 0 1 10 10')).toEqual([['M', [0, 0]], ['A', [5, 5, 0, 0, 1, 10, 10]]]);
+  });
+
+  it('parses terse numbers with implicit separators (10-5)', () => {
+    expect(tokenizePathD('M0 0L10-5')).toEqual([['M', [0, 0]], ['L', [10, -5]]]);
+  });
+
   it('returns an empty list for an empty d string', () => {
     expect(tokenizePathD('')).toEqual([]);
+  });
+});
+
+describe('parseSvgToPaths — curve flattening', () => {
+  const points = (d: string) => pathsOf(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${d}" fill="#000"/></svg>`).polygons[0].points;
+
+  it('flattens a cubic Bézier into a polyline ending at the curve endpoint', () => {
+    const pts = points('M0 0 C0 100 100 100 100 0'); // 1 move + 16 samples
+    expect(pts).toHaveLength(17);
+    expect(pts[0]).toEqual({ x: 0, y: 0 });
+    expect(pts[16].x).toBeCloseTo(100);
+    expect(pts[16].y).toBeCloseTo(0);
+  });
+
+  it('flattens a quadratic Bézier through its expected midpoint', () => {
+    const pts = points('M0 0 Q50 100 100 0');
+    expect(pts).toHaveLength(17);
+    expect(pts[8]).toEqual({ x: 50, y: 50 }); // t=0.5 of the quad
+    expect(pts[16].x).toBeCloseTo(100);
+  });
+
+  it('flattens an elliptical arc with a bulge and correct endpoint', () => {
+    const pts = points('M0 0 A50 50 0 0 1 100 0');
+    expect(pts.length).toBeGreaterThan(3);
+    const last = pts[pts.length - 1];
+    expect(last.x).toBeCloseTo(100);
+    expect(last.y).toBeCloseTo(0);
+    expect(Math.max(...pts.map(p => Math.abs(p.y)))).toBeGreaterThan(10); // not a straight line
+  });
+
+  it('handles a smooth cubic (S) reflecting the previous control point', () => {
+    const pts = points('M0 0 C0 50 50 50 50 0 S100 50 100 0'); // 1 + 16 + 16
+    expect(pts).toHaveLength(33);
+    expect(pts[32].x).toBeCloseTo(100);
+    expect(pts[32].y).toBeCloseTo(0);
   });
 });
 

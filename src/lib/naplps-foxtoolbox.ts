@@ -1,16 +1,10 @@
 // NAPLPS Encoder following TelidonP5.js expectations
 // Based on breakthrough findings: use polygons (0x37) for filled shapes
 
-export interface NAPLPSPoint {
-  x: number; // 0.0 to 1.0
-  y: number; // 0.0 to 1.0
-}
-
-export interface NAPLPSColor {
-  r: number; // 0-255
-  g: number; // 0-255
-  b: number; // 0-255
-}
+// Shared types live in ./naplps (single source of truth). Here NAPLPSPoint
+// components are normalized 0.0–1.0 and NAPLPSColor components are 0–255.
+import type { NAPLPSPoint, NAPLPSColor } from './naplps';
+export type { NAPLPSPoint, NAPLPSColor };
 
 // Pack a 12-bit coordinate into two 6-bit nibbles, each offset by 0x40
 function packCoordinate12bit(value: number): [number, number] {
