@@ -17,6 +17,12 @@ const svgDoc = (inner: string) =>
     'image/svg+xml',
   );
 
+// Parse a full SVG string and feed parseSvgToPaths the (doc, cssMap) it now expects.
+const pathsOf = (svg: string) => {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  return parseSvgToPaths(doc, buildCssClassMap(doc));
+};
+
 describe('tokenizePathD', () => {
   it('splits commands and parses their numeric args', () => {
     expect(tokenizePathD('M0 0 L10 0')).toEqual([
@@ -140,14 +146,14 @@ describe('optimizeRectangles', () => {
 describe('parseSvgToPaths', () => {
   it('recovers an axis-aligned rectangle path as a rect, not a polygon', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 5 L0 5 Z" fill="#ff0000"/></svg>';
-    const { rects, polygons } = parseSvgToPaths(svg);
+    const { rects, polygons } = pathsOf(svg);
     expect(rects).toEqual([{ x: 0, y: 0, width: 10, height: 5, color: '#ff0000' }]);
     expect(polygons).toHaveLength(0);
   });
 
   it('keeps a triangular path as a polygon', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L5 8 Z" fill="#00ff00"/></svg>';
-    const { rects, polygons } = parseSvgToPaths(svg);
+    const { rects, polygons } = pathsOf(svg);
     expect(rects).toHaveLength(0);
     expect(polygons).toHaveLength(1);
     expect(polygons[0].color).toBe('#00ff00');
@@ -158,13 +164,13 @@ describe('parseSvgToPaths', () => {
     const svg =
       '<svg xmlns="http://www.w3.org/2000/svg"><style>.st0{fill:#FF8C00;}</style>' +
       '<path class="st0" d="M0 0 L10 0 L5 8 Z"/></svg>';
-    const { polygons } = parseSvgToPaths(svg);
+    const { polygons } = pathsOf(svg);
     expect(polygons[0].color).toBe('#FF8C00');
   });
 
   it('skips paths with fill:none', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L5 8 Z" fill="none"/></svg>';
-    const { rects, polygons } = parseSvgToPaths(svg);
+    const { rects, polygons } = pathsOf(svg);
     expect(rects).toHaveLength(0);
     expect(polygons).toHaveLength(0);
   });

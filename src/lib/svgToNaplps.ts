@@ -42,10 +42,19 @@ export interface PolygonShape {
   color: string;
 }
 
-function parseSvgToPolygons(svgString: string): PolygonShape[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const cssMap = buildCssClassMap(doc);
+// Parse the SVG string into a DOM once and build the shared class→fill map.
+// All shape extractors take the resulting (doc, cssMap) so a single conversion
+// parses the document one time instead of once per shape type.
+function parseSvgDocument(svgString: string): { doc: Document; cssMap: Map<string, string> } {
+  const doc = new DOMParser().parseFromString(svgString, 'image/svg+xml');
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) {
+    throw new Error('Malformed SVG: ' + (parseError.textContent?.trim().split('\n')[0] ?? 'parse error'));
+  }
+  return { doc, cssMap: buildCssClassMap(doc) };
+}
+
+function parseSvgToPolygons(doc: Document, cssMap: Map<string, string>): PolygonShape[] {
   const shapes: PolygonShape[] = [];
 
   doc.querySelectorAll('polygon, polyline').forEach(el => {
@@ -72,10 +81,7 @@ function ellipseToPolygonPoints(cx: number, cy: number, rx: number, ry: number, 
   return points;
 }
 
-function parseSvgToCirclesAndEllipses(svgString: string): PolygonShape[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const cssMap = buildCssClassMap(doc);
+function parseSvgToCirclesAndEllipses(doc: Document, cssMap: Map<string, string>): PolygonShape[] {
   const shapes: PolygonShape[] = [];
 
   doc.querySelectorAll('circle').forEach(el => {
@@ -172,10 +178,7 @@ export function extractRectIfAxisAligned(points: Array<{ x: number; y: number }>
 
 // Parse SVG <path> elements into rects (axis-aligned 4-point paths) and polygons.
 // Handles: M/m (moveto), L/l (lineto), H/h (horiz), V/v (vert), Z/z (close)
-export function parseSvgToPaths(svgString: string): { rects: Rectangle[], polygons: PolygonShape[] } {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const cssMap = buildCssClassMap(doc);
+export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { rects: Rectangle[], polygons: PolygonShape[] } {
   const rects: Rectangle[] = [];
   const shapes: PolygonShape[] = [];
 
@@ -339,17 +342,8 @@ const TELIDON_PALETTE = [
   { r: 255, g: 255, b: 255 },   // 15: White
 ];
 
-// Parse SVG and extract pixel rectangles
-function parseSvgToPixels(svgString: string): Rectangle[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-
-  const parseError = doc.querySelector('parsererror');
-  if (parseError) {
-    throw new Error('Malformed SVG: ' + (parseError.textContent?.trim().split('\n')[0] ?? 'parse error'));
-  }
-
-  const cssMap = buildCssClassMap(doc);
+// Extract <rect> elements as pixel rectangles
+function parseSvgToPixels(doc: Document, cssMap: Map<string, string>): Rectangle[] {
   const rects = doc.querySelectorAll('rect');
   const rectangles: Rectangle[] = [];
   rects.forEach(rect => {
@@ -517,7 +511,8 @@ function scaleCoordinates(rectangles: Rectangle[], maxWidth: number, maxHeight: 
 
 export async function svgToNaplps(svgString: string, width: number, height: number): Promise<string> {
   try {
-    let rectangles = parseSvgToPixels(svgString);
+    const { doc, cssMap } = parseSvgDocument(svgString);
+    let rectangles = parseSvgToPixels(doc, cssMap);
     if (rectangles.length === 0) {
       throw new Error('SVG contains no <rect> elements — output would be empty.');
     }
@@ -549,11 +544,12 @@ export async function svgToNaplps(svgString: string, width: number, height: numb
 
 export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, height: number): Promise<string> {
   try {
-    let rectangles = parseSvgToPixels(svgString);
+    const { doc, cssMap } = parseSvgDocument(svgString);
+    let rectangles = parseSvgToPixels(doc, cssMap);
     const rectsBefore = rectangles.length;
-    const polygons = parseSvgToPolygons(svgString);
-    const circles  = parseSvgToCirclesAndEllipses(svgString);
-    const { rects: pathRects, polygons: paths } = parseSvgToPaths(svgString);
+    const polygons = parseSvgToPolygons(doc, cssMap);
+    const circles  = parseSvgToCirclesAndEllipses(doc, cssMap);
+    const { rects: pathRects, polygons: paths } = parseSvgToPaths(doc, cssMap);
     // Merge all rects together (native + recovered from paths) in one pass
     rectangles = optimizeRectangles([...rectangles, ...pathRects]);
 
@@ -642,12 +638,10 @@ export function getConversionStats(svgString: string): {
   compressionRatio: number;
   optimizationRatio: number;
 } {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const rects = doc.querySelectorAll('rect');
-  const totalPixels = rects.length;
+  const { doc, cssMap } = parseSvgDocument(svgString);
+  const totalPixels = doc.querySelectorAll('rect').length;
 
-  const rectangles = parseSvgToPixels(svgString);
+  const rectangles = parseSvgToPixels(doc, cssMap);
   const totalRectangles = rectangles.length;
 
   const optimizedRectangles = optimizeRectangles(rectangles).length;
