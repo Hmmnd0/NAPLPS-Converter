@@ -85,6 +85,35 @@ function getnum(ops: number[], mvl: number): NapPoint {
   return { x: x / ONE, y: y / ONE };
 }
 
+// Circle through 3 points → arc sampled as a smooth polyline. NAPLPS arcs are
+// drawn through start/mid/end (RHINO sp3arc); rendering the raw 3 points as a
+// polyline gives a jagged triangle, so we reconstruct the circle and sample it.
+function sampleArc(p0: NapPoint, p1: NapPoint, p2: NapPoint, n = 24): NapPoint[] {
+  const d = 2 * (p0.x * (p1.y - p2.y) + p1.x * (p2.y - p0.y) + p2.x * (p0.y - p1.y));
+  if (Math.abs(d) < 1e-9) return [p0, p1, p2]; // collinear → straight
+  const s0 = p0.x * p0.x + p0.y * p0.y, s1 = p1.x * p1.x + p1.y * p1.y, s2 = p2.x * p2.x + p2.y * p2.y;
+  const cx = (s0 * (p1.y - p2.y) + s1 * (p2.y - p0.y) + s2 * (p0.y - p1.y)) / d;
+  const cy = (s0 * (p2.x - p1.x) + s1 * (p0.x - p2.x) + s2 * (p1.x - p0.x)) / d;
+  const r = Math.hypot(p0.x - cx, p0.y - cy);
+  const ang = (p: NapPoint) => Math.atan2(p.y - cy, p.x - cx);
+  const norm = (x: number) => { let v = x; while (v < 0) v += 2 * Math.PI; while (v >= 2 * Math.PI) v -= 2 * Math.PI; return v; };
+  const a0 = ang(p0);
+  const fullCircle = Math.hypot(p0.x - p2.x, p0.y - p2.y) < r * 1e-3;
+  let total: number;
+  if (fullCircle) {
+    total = 2 * Math.PI; // start == end → whole circle
+  } else {
+    const sweepCCW = norm(ang(p2) - a0);
+    total = norm(ang(p1) - a0) <= sweepCCW ? sweepCCW : sweepCCW - 2 * Math.PI;
+  }
+  const pts: NapPoint[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = a0 + total * (i / n);
+    pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+  }
+  return pts;
+}
+
 // getadr — single-value (color index / angle). Returns the raw scaled integer.
 function getadr(ops: number[], svl: number): number {
   let a = 0;
@@ -167,8 +196,19 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
     } else if (POINT_OPS.has(b)) {
       shapes.push({ type: 'point', points: [pts[0]], color: curColor, filled: true });
       cur = pts[pts.length - 1];
-    } else if (LINE_OPS.has(b) || ARC_OPS.has(b)) {
+    } else if (LINE_OPS.has(b)) {
       shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
+      cur = pts[pts.length - 1];
+    } else if (ARC_OPS.has(b)) {
+      // SET variants carry start/mid/end; plain arcs start from the current point.
+      const setArc = b === 0x2e || b === 0x2f;
+      const a = setArc ? pts : [cur, ...pts];
+      if (a.length >= 3) {
+        const sampled = sampleArc(a[0], a[1], a[2]);
+        shapes.push({ type: FILLED.has(b) ? 'polygon' : 'polyline', points: sampled, color: curColor, filled: FILLED.has(b) });
+      } else {
+        shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
+      }
       cur = pts[pts.length - 1];
     } else if (POLY_OPS.has(b)) {
       shapes.push({ type: 'polygon', points: pts, color: curColor, filled: FILLED.has(b) });
