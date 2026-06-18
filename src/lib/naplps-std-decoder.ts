@@ -200,16 +200,26 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
       shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
       cur = pts[pts.length - 1];
     } else if (ARC_OPS.has(b)) {
-      // SET variants carry start/mid/end; plain arcs start from the current point.
+      // SET variants carry the points directly; plain arcs start from the current point.
+      // RHINO sp3arc: 3 points → arc through them; 2 points → full circle with the two
+      // points as diameter endpoints (sp3arc(p0,p1,p0)). The eagle's eye is a 2-point arc.
       const setArc = b === 0x2e || b === 0x2f;
       const a = setArc ? pts : [cur, ...pts];
-      if (a.length >= 3) {
-        const sampled = sampleArc(a[0], a[1], a[2]);
+      let sampled: NapPoint[] | null = null;
+      if (a.length === 2) {
+        const cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2;
+        const r = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) / 2;
+        sampled = [];
+        for (let k = 0; k <= 24; k++) { const t = (2 * Math.PI * k) / 24; sampled.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) }); }
+      } else if (a.length >= 3) {
+        sampled = sampleArc(a[0], a[1], a[2]);
+      }
+      if (sampled) {
         shapes.push({ type: FILLED.has(b) ? 'polygon' : 'polyline', points: sampled, color: curColor, filled: FILLED.has(b) });
-      } else {
+      } else if (pts.length > 0) {
         shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
       }
-      cur = pts[pts.length - 1];
+      if (pts.length > 0) cur = pts[pts.length - 1];
     } else if (POLY_OPS.has(b)) {
       shapes.push({ type: 'polygon', points: pts, color: curColor, filled: FILLED.has(b) });
       cur = pts[pts.length - 1];
