@@ -58,14 +58,15 @@ const COORD_OPS = new Set([
   ...PTSET_OPS, ...POINT_OPS, ...LINE_OPS, ...ARC_OPS, ...RECT_OPS, ...POLY_OPS,
 ]);
 
-// Default colour map. Real files usually define the slots they use via SET-COLOR
-// (e.g. SANTA), but some (e.g. EAGLE1) rely on defaults. Low 8 = saturated
-// videotex colours, high 8 = a grayscale ramp so undefined light slots stay
-// neutral rather than turning an unexpected hue.
+// Default colour map — the exact period default (RHINO defmap[16], GRB order,
+// 0..8192 scaled to 0..255). Slots 0-7 are a black→white grayscale ramp, 8-15
+// the colours. Files that rely on defaults (e.g. EAGLE1) need this; files that
+// define their own palette via SET-COLOR (e.g. SANTA) override it.
 const DEFAULT_PALETTE: NapColor[] = [
-  { r: 0, g: 0, b: 0 }, { r: 255, g: 0, b: 0 }, { r: 0, g: 255, b: 0 }, { r: 255, g: 255, b: 0 },
-  { r: 0, g: 0, b: 255 }, { r: 255, g: 0, b: 255 }, { r: 0, g: 255, b: 255 }, { r: 255, g: 255, b: 255 },
-  ...Array.from({ length: 8 }, (_, i) => { const v = Math.round((i / 7) * 255); return { r: v, g: v, b: v }; }),
+  { r: 0, g: 0, b: 0 }, { r: 32, g: 32, b: 32 }, { r: 64, g: 64, b: 64 }, { r: 96, g: 96, b: 96 },
+  { r: 128, g: 128, b: 128 }, { r: 159, g: 159, b: 159 }, { r: 191, g: 191, b: 191 }, { r: 255, g: 255, b: 255 },
+  { r: 0, g: 0, b: 223 }, { r: 159, g: 0, b: 223 }, { r: 223, g: 0, b: 128 }, { r: 223, g: 64, b: 0 },
+  { r: 223, g: 223, b: 0 }, { r: 64, g: 223, b: 0 }, { r: 0, g: 223, b: 128 }, { r: 0, g: 159, b: 223 },
 ];
 
 const data6 = (b: number) => b & 0x3f;

@@ -55,7 +55,7 @@ describe('naplpsToSvg', () => {
   it('produces a valid SVG with shapes from a real .nap', () => {
     const { svg, shapeCount, commandCounts } = naplpsToSvg(fixture('eagle1.nap'));
     expect(svg.startsWith('<svg')).toBe(true);
-    expect(svg).toContain('viewBox="0 0 256 192"');
+    expect(svg).toMatch(/viewBox="[\d.\- ]+"/); // viewBox auto-fits content bounds
     expect(svg).toContain('<polygon');
     expect(shapeCount).toBeGreaterThan(10);
     expect(commandCounts['SET&POLY-FILLED']).toBeGreaterThan(0);
