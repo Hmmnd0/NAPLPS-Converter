@@ -6,6 +6,7 @@ import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
 import { svgToNaplps, svgToNaplpsFoxtoolbox, getConversionStats } from '@/lib/svgToNaplps';
+import { naplpsToSvg } from '@/lib/naplpsToSvg';
 
 // ─── Download helpers ─────────────────────────────────────────────────────────
 
@@ -68,6 +69,12 @@ export default function Home() {
   const [svgUploadNaplpsData, setSvgUploadNaplpsData] = useState<string>('');
   const [isSvgUploadProcessing, setIsSvgUploadProcessing] = useState<boolean>(false);
   const [svgUploadError, setSvgUploadError] = useState<string>('');
+
+  // .nap import → SVG (read REAL period NAPLPS files)
+  const [napImportName, setNapImportName] = useState<string>('');
+  const [napImportSvg, setNapImportSvg] = useState<string>('');
+  const [napImportStats, setNapImportStats] = useState<Record<string, number> | null>(null);
+  const [napImportError, setNapImportError] = useState<string>('');
 
   const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
@@ -213,6 +220,32 @@ export default function Home() {
       setSvgUploadError('Conversion failed: ' + (err instanceof Error ? err.message : String(err)));
     }
     setIsSvgUploadProcessing(false);
+  };
+
+  const handleNapImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setNapImportError('');
+    setNapImportSvg('');
+    setNapImportStats(null);
+    setNapImportName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const bytes = new Uint8Array(ev.target?.result as ArrayBuffer);
+        const { svg, shapeCount, commandCounts } = naplpsToSvg(bytes);
+        if (shapeCount === 0) {
+          setNapImportError('No drawable shapes were decoded — this may be a text-only or unsupported NAPLPS frame.');
+          return;
+        }
+        setNapImportSvg(svg);
+        setNapImportStats(commandCounts);
+      } catch (err) {
+        setNapImportError('Decode failed: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    };
+    reader.onerror = () => setNapImportError('Could not read file.');
+    reader.readAsArrayBuffer(file);
   };
 
   return (
@@ -486,6 +519,60 @@ export default function Home() {
                     </span>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Import real NAPLPS (.nap → SVG) */}
+        <div className="mt-12 bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Import NAPLPS (.nap → SVG)</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Decode a <em>real</em> NAPLPS file (period videotex art, BBS-era <code>.nap</code>) into
+            SVG. Handles standard interleaved coordinates, the indexed palette, polygons, lines and points.
+          </p>
+
+          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+            <span className="text-gray-500 text-sm mb-1">
+              {napImportName ? napImportName : 'Click or drag a .nap file here'}
+            </span>
+            <span className="text-xs text-gray-400">.nap files (real NAPLPS frames)</span>
+            <input type="file" accept=".nap,application/octet-stream" className="hidden" onChange={handleNapImport} />
+          </label>
+
+          {napImportError && <p className="mt-3 text-sm text-red-700">{napImportError}</p>}
+
+          {napImportSvg && (
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">Decoded Preview</h3>
+                <div
+                  className="border border-gray-200 rounded-lg bg-black flex items-center justify-center min-h-[200px] overflow-hidden"
+                  dangerouslySetInnerHTML={{ __html: napImportSvg }}
+                />
+                <button
+                  className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  onClick={() => {
+                    const base = napImportName.replace(/\.nap$/i, '') || 'imported';
+                    downloadText(`<?xml version="1.0" encoding="UTF-8"?>\n${napImportSvg}`, `${base}.svg`, 'image/svg+xml');
+                  }}
+                >
+                  Download SVG
+                </button>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">NAPLPS Commands Decoded</h3>
+                <div className="border border-gray-200 rounded-lg bg-gray-50 p-3 text-sm font-mono text-gray-700 max-h-[260px] overflow-y-auto">
+                  {napImportStats &&
+                    Object.entries(napImportStats)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([name, count]) => (
+                        <div key={name} className="flex justify-between">
+                          <span>{name}</span>
+                          <span className="text-gray-500">{count}</span>
+                        </div>
+                      ))}
+                </div>
               </div>
             </div>
           )}

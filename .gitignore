@@ -44,3 +44,5 @@ next-env.d.ts
 *.nap
 *.nap.txt
 naplps_output.*
+# but DO track the real period .nap files used as decoder test fixtures
+!test-fixtures/nap/*.nap
