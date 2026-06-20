@@ -1,6 +1,6 @@
 "use client";
 import React, { useRef, useState } from "react";
-import { naplpsToSvg } from "@/lib/naplpsToSvg";
+import { rasterizeNaplps } from "@/lib/naplpsRaster";
 
 type Renderer = "standard" | "telidon";
 
@@ -10,6 +10,8 @@ export default function NaplpsViewer() {
   const [error, setError] = useState<string>("");
   const [renderer, setRenderer] = useState<Renderer>("standard");
   const [stats, setStats] = useState<Record<string, number> | null>(null);
+  const [resolution, setResolution] = useState<number>(256);
+  const [pixelated, setPixelated] = useState<boolean>(false);
   const lastBytes = useRef<Uint8Array | null>(null);
 
   // Load Telidon scripts on mount (only needed for the legacy renderer)
@@ -25,18 +27,33 @@ export default function NaplpsViewer() {
     });
   }, []);
 
-  // Decode with the standard decoder and draw the SVG into the canvas div.
+  // Decode and rasterize with the period rendering model (low-res scanline fill
+  // + boundary pixels), then scale the framebuffer up to fill the viewer box.
+  // This reproduces the original DOS viewers and, unlike the vector SVG path,
+  // leaves no seams between the source art's near-coincident region edges.
   const renderStandard = (bytes: Uint8Array) => {
-    const { svg, shapeCount, commandCounts } = naplpsToSvg(bytes);
-    if (!canvasRef.current) return;
+    const host = canvasRef.current;
+    if (!host) return;
+    const { width, height, pixels, shapeCount, commandCounts } = rasterizeNaplps(bytes, { height: resolution });
+    setStats(commandCounts);
     if (shapeCount === 0) {
-      canvasRef.current.innerHTML = '<span class="text-gray-400">No drawable shapes (text-only frame?)</span>';
-      setStats(commandCounts);
+      host.innerHTML = '<span class="text-gray-400">No drawable shapes (text-only frame?)</span>';
       return;
     }
-    // Scale the SVG to fit the viewer box while preserving aspect ratio.
-    canvasRef.current.innerHTML = svg.replace(/width="\d+" height="\d+"/, 'width="100%" height="100%"');
-    setStats(commandCounts);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
+    // Fit within the viewer box, preserving aspect; CSS scales the small buffer up.
+    canvas.style.maxWidth = "100%";
+    canvas.style.maxHeight = "100%";
+    canvas.style.width = "auto";
+    canvas.style.height = "auto";
+    canvas.style.imageRendering = pixelated ? "pixelated" : "auto";
+    host.innerHTML = "";
+    host.appendChild(canvas);
   };
 
   const renderTelidon = (bytes: Uint8Array) => {
@@ -90,6 +107,12 @@ export default function NaplpsViewer() {
     if (lastBytes.current) draw(lastBytes.current, mode);
   };
 
+  // Re-rasterize when the resolution / scaling controls change.
+  React.useEffect(() => {
+    if (renderer === "standard" && lastBytes.current) renderStandard(lastBytes.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolution, pixelated]);
+
   return (
     <div className="flex flex-col items-center py-8 w-full">
       <h1 className="text-2xl font-bold mb-2">NAPLPS Viewer</h1>
@@ -104,6 +127,24 @@ export default function NaplpsViewer() {
           <span>TelidonP5 <span className="text-gray-400">(legacy dialect)</span></span>
         </label>
       </div>
+
+      {renderer === "standard" && (
+        <div className="flex items-center gap-4 mb-4 text-sm text-gray-600">
+          <label className="flex items-center gap-2">
+            <span>Resolution</span>
+            <input
+              type="range" min={96} max={512} step={16}
+              value={resolution}
+              onChange={(e) => setResolution(Number(e.target.value))}
+            />
+            <span className="font-mono w-10">{resolution}px</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={pixelated} onChange={(e) => setPixelated(e.target.checked)} />
+            <span>Pixelated</span>
+          </label>
+        </div>
+      )}
 
       <input
         type="file"

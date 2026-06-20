@@ -5,7 +5,7 @@ import Link from 'next/link';
 import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
-import { svgToNaplps, svgToNaplpsFoxtoolbox, getConversionStats } from '@/lib/svgToNaplps';
+import { svgToNaplps, svgToNaplpsFoxtoolbox, svgToNaplpsStandard, getConversionStats } from '@/lib/svgToNaplps';
 import { naplpsToSvg } from '@/lib/naplpsToSvg';
 
 // ─── Download helpers ─────────────────────────────────────────────────────────
@@ -222,6 +222,30 @@ export default function Home() {
     setIsSvgUploadProcessing(false);
   };
 
+  // Read an SVG's pixel dimensions from its viewBox or width/height attributes.
+  const extractSvgDims = (svg: string): { width: number; height: number } => {
+    const el = new DOMParser().parseFromString(svg, 'image/svg+xml').querySelector('svg');
+    let width = 0, height = 0;
+    const vb = el?.getAttribute('viewBox');
+    if (vb) { const p = vb.trim().split(/[\s,]+/); width = parseFloat(p[2]) || 0; height = parseFloat(p[3]) || 0; }
+    if (!width) width = parseFloat(el?.getAttribute('width') || '0');
+    if (!height) height = parseFloat(el?.getAttribute('height') || '0');
+    return { width, height };
+  };
+
+  // Export the current SVG as a REAL standard NAPLPS .nap (period-tool readable),
+  // using the standard encoder rather than the app's TelidonP5 dialect.
+  const downloadStandardNap = async (svg: string, baseName: string) => {
+    try {
+      const { width, height } = extractSvgDims(svg);
+      if (!width || !height) { setError('Could not determine SVG dimensions for standard .nap export.'); return; }
+      const bytes = await svgToNaplpsStandard(svg, width, height);
+      downloadBinary(bytes, `${baseName}.nap`);
+    } catch (e) {
+      setError('Standard .nap export failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
   const handleNapImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -409,8 +433,16 @@ export default function Home() {
                       }}
                       className="w-full mt-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                     >
-                      Download NAPLPS (.nap)
+                      Download NAPLPS (.nap) <span className="opacity-75">— TelidonP5 dialect</span>
                     </button>
+                    {svgString && (
+                      <button
+                        onClick={() => downloadStandardNap(svgString, 'naplps_output_standard')}
+                        className="w-full mt-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                      >
+                        Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
+                      </button>
+                    )}
                     {/* Hex/byte preview */}
                     <div className="mt-4 bg-gray-100 p-2 rounded text-xs font-mono text-gray-700">
                       <div>First 64 bytes (hex):</div>
@@ -500,7 +532,13 @@ export default function Home() {
                         downloadBinary(hexToBytes(svgUploadNaplpsData), `${base}.nap`);
                       }}
                     >
-                      Download .nap
+                      Download .nap <span className="opacity-75">— TelidonP5 dialect</span>
+                    </button>
+                    <button
+                      className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                      onClick={() => downloadStandardNap(svgUploadString, (svgUploadFilename.replace(/\.svg$/i, '') || 'output') + '_standard')}
+                    >
+                      Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
                     </button>
                     <button
                       className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"

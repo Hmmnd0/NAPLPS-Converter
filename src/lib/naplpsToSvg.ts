@@ -40,6 +40,15 @@ export function naplpsToSvg(bytes: Uint8Array | number[], opts: NaplpsToSvgOptio
 
   const map = (p: NapPoint) => `${sx(p).toFixed(1)},${sy(p).toFixed(1)}`;
 
+  // Period renderers set polygon boundary pixels and ran at low resolution, so
+  // adjacent fills met seamlessly even though the hand-drawn source contours of
+  // neighbouring regions don't perfectly coincide (gaps of several coordinate
+  // units, e.g. the flag canton vs. the eagle's head). At our higher resolution
+  // the black background shows through those gaps. Painting each filled
+  // polygon's own outline in its fill colour closes the seams without
+  // distorting shapes.
+  const seam = Math.max(1.5, Math.min(vbW, vbH) * 0.009).toFixed(2);
+
   const els: string[] = [];
   if (bg) els.push(`<rect x="${vbX.toFixed(1)}" y="${vbY.toFixed(1)}" width="${vbW.toFixed(1)}" height="${vbH.toFixed(1)}" fill="${bg}"/>`);
 
@@ -48,7 +57,7 @@ export function naplpsToSvg(bytes: Uint8Array | number[], opts: NaplpsToSvgOptio
     if (s.type === 'polygon') {
       els.push(
         s.filled
-          ? `<polygon points="${pts}" fill="${rgb(s.color)}"/>`
+          ? `<polygon points="${pts}" fill="${rgb(s.color)}" stroke="${rgb(s.color)}" stroke-width="${seam}" stroke-linejoin="round"/>`
           : `<polygon points="${pts}" fill="none" stroke="${rgb(s.color)}" stroke-width="1"/>`,
       );
     } else if (s.type === 'polyline') {

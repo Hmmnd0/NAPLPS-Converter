@@ -1,5 +1,7 @@
 import { NAPLPSEncoder, NAPLPSPoint, NAPLPSColor } from './naplps';
 import { NAPLPSFoxtoolboxEncoder } from './naplps-foxtoolbox';
+import { encodeNaplpsStandard, NapText } from './naplps-std-encoder';
+import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
 
 // Set to true to enable detailed conversion debug logging in the browser console
 const DEBUG_SVG_NAPLPS = false;
@@ -780,6 +782,101 @@ export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, he
     console.error('Error in svgToNaplpsFoxtoolbox:', error);
     throw error;
   }
+}
+
+// Convert an SVG (e.g. from a traced PNG) into a REAL standard NAPLPS .nap byte
+// stream — interleaved coordinates + indexed palette, readable by period tools —
+// using the standard encoder. This is the counterpart to svgToNaplpsFoxtoolbox,
+// which emits the app's own TelidonP5 dialect instead.
+export async function svgToNaplpsStandard(
+  svgString: string,
+  width: number,
+  height: number,
+  opts: { maxColors?: number; fieldHeight?: number; margin?: number; texts?: NapText[]; minShapeArea?: number; excludeFills?: string[] } = {},
+): Promise<Uint8Array> {
+  const { doc, cssMap } = parseSvgDocument(svgString);
+  const rects = optimizeRectangles([
+    ...parseSvgToPixels(doc, cssMap),
+    ...parseSvgToPaths(doc, cssMap).rects,
+  ]);
+  const polygons = parseSvgToPolygons(doc, cssMap);
+  const circles = parseSvgToCirclesAndEllipses(doc, cssMap);
+  const paths = parseSvgToPaths(doc, cssMap).polygons;
+
+  if (rects.length === 0 && polygons.length === 0 && circles.length === 0 && paths.length === 0) {
+    throw new Error('SVG contains no supported shapes — standard .nap output would be empty.');
+  }
+
+  // Map the SVG into NAPLPS coordinates. NAPLPS works in a 0..1 unit square with
+  // Y pointing up, but period viewers (TURSHOW) only display Y up to ~0.75 (the
+  // 4:3 field) — content above that is clipped off the top. So fit the image,
+  // preserving its aspect ratio, into a margined box inside that visible field
+  // and centre it (letterbox), rather than stretching it to the full square.
+  // This also keeps shapes off the exact 0/1 edges, avoiding full-span deltas.
+  const fieldH = opts.fieldHeight ?? 0.75;
+  const m = opts.margin ?? 0.03;
+  const boxX0 = m, boxY0 = m, boxW = 1 - 2 * m, boxH = fieldH - 2 * m;
+  const pxPerUnit = Math.max(width / boxW, height / boxH); // isotropic fit
+  const contentW = width / pxPerUnit, contentH = height / pxPerUnit;
+  const xOff = boxX0 + (boxW - contentW) / 2;
+  const yOff = boxY0 + (boxH - contentH) / 2; // NAPLPS-Y of the content's bottom
+  const norm = (p: { x: number; y: number }): NapPoint => ({
+    x: xOff + (p.x / width) * contentW,
+    y: yOff + (1 - p.y / height) * contentH,
+  });
+  const toColor = (c: string): NapColor => {
+    const k = parseColor(c);
+    return { r: k.r, g: k.g, b: k.b };
+  };
+  // Colours to drop from the graphic (e.g. '#000000' for the black-default
+  // fragments left by traced text, when that text is being supplied as font
+  // text instead). Fill-less SVG shapes resolve to black via resolveFill.
+  const excluded = (opts.excludeFills ?? []).map(toColor);
+  const isExcluded = (c: NapColor) => excluded.some(e => e.r === c.r && e.g === c.g && e.b === c.b);
+
+  // Despeckle: drop shapes whose pixel-space bounding box is below this area.
+  // Traced rasterized text/anti-aliasing leaves hundreds of tiny fragments; the
+  // real graphic is a few large regions, so a modest threshold strips the junk.
+  const minArea = opts.minShapeArea ?? 0;
+  const bboxArea = (pts: { x: number; y: number }[]) => {
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    for (const p of pts) { if (p.x < mnx) mnx = p.x; if (p.x > mxx) mxx = p.x; if (p.y < mny) mny = p.y; if (p.y > mxy) mxy = p.y; }
+    return (mxx - mnx) * (mxy - mny);
+  };
+
+  const shapes: NapShape[] = [];
+  for (const r of rects) {
+    if (r.width * r.height < minArea) continue;
+    const color = toColor(r.color);
+    if (isExcluded(color)) continue;
+    shapes.push({
+      type: 'polygon',
+      filled: true,
+      color,
+      points: [
+        norm({ x: r.x, y: r.y }),
+        norm({ x: r.x + r.width, y: r.y }),
+        norm({ x: r.x + r.width, y: r.y + r.height }),
+        norm({ x: r.x, y: r.y + r.height }),
+      ],
+    });
+  }
+  for (const shape of [...polygons, ...paths]) {
+    const simplified = dpSimplify(shape.points, DP_TOLERANCE);
+    if (simplified.length < 3) continue;
+    if (bboxArea(simplified) < minArea) continue;
+    const color = toColor(shape.color);
+    if (isExcluded(color)) continue;
+    shapes.push({ type: 'polygon', filled: true, color, points: simplified.map(norm) });
+  }
+  for (const shape of circles) {
+    if (bboxArea(shape.points) < minArea) continue;
+    const color = toColor(shape.color);
+    if (isExcluded(color)) continue;
+    shapes.push({ type: 'polygon', filled: true, color, points: shape.points.map(norm) });
+  }
+
+  return encodeNaplpsStandard(shapes, { maxColors: opts.maxColors, texts: opts.texts }).bytes;
 }
 
 // Get statistics about the conversion
