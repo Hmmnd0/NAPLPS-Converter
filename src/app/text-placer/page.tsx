@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import AppHeader from "@/components/AppHeader";
 import { svgToNaplpsStandard } from "@/lib/svgToNaplps";
 import { rasterizeNaplps } from "@/lib/naplpsRaster";
 import type { NapText } from "@/lib/naplps-std-encoder";
@@ -277,22 +277,19 @@ export default function TextPlacer() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">NAPLPS Text Placer</h1>
-            <p className="text-gray-600 mt-1">
-              Drop font text onto a traced graphic and export a real, TURSHOW-readable <code>.nap</code>. Drag blocks to
-              position; the preview shows the true NAPLPS field.
-            </p>
-          </div>
-          <Link href="/" className="px-4 py-2 bg-gray-200 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
-            ← Home
-          </Link>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <AppHeader />
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
+        <div className="mb-6">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">NAPLPS Text Placer</h1>
+          <p className="text-zinc-500 mt-2 max-w-2xl">
+            Drop font text onto a traced graphic and export a real, TURSHOW-readable{" "}
+            <code className="px-1 py-0.5 rounded bg-zinc-100 text-zinc-700 text-sm font-mono">.nap</code>. Drag blocks to
+            position; the preview shows the true NAPLPS field.
+          </p>
         </div>
 
-        {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>}
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>}
 
         <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
           {/* ── Preview ─────────────────────────────────────────────────── */}
@@ -321,7 +318,7 @@ export default function TextPlacer() {
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <label className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold cursor-pointer hover:bg-blue-700">
+              <label className="btn-primary cursor-pointer">
                 Upload SVG graphic
                 <input type="file" accept=".svg,image/svg+xml" onChange={handleSvgUpload} className="hidden" />
               </label>
@@ -352,16 +349,16 @@ export default function TextPlacer() {
           {/* ── Panel ───────────────────────────────────────────────────── */}
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              <button onClick={addBlock} className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700">
+              <button onClick={addBlock} className="btn-ghost">
                 + Add text
               </button>
-              <button onClick={loadMadMaze} className="px-3 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700">
+              <button onClick={loadMadMaze} className="btn-neutral">
                 Load MadMaze example
               </button>
               <button
                 onClick={download}
                 disabled={!svgString}
-                className="px-3 py-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn-accent"
               >
                 Download .nap
               </button>

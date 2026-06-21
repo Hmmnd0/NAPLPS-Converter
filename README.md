@@ -6,6 +6,16 @@ It can produce **real, period-tool-readable `.nap` files** (verified against the
 
 ---
 
+## Screens
+
+| Converter — PNG/SVG → NAPLPS | Text Placer — font text over a graphic |
+| :---: | :---: |
+| ![Converter](docs/screenshots/converter.png) | ![Text Placer](docs/screenshots/text-placer.png) |
+| **Viewer — render real `.nap`** | **Optimizer — clean up &amp; shrink `.nap`** |
+| ![Viewer](docs/screenshots/viewer.png) | ![Optimizer](docs/screenshots/optimizer.png) |
+
+---
+
 ## Two NAPLPS dialects
 
 This project encodes/decodes NAPLPS in two flavors. Knowing which is which matters:
@@ -27,7 +37,7 @@ The **standard** path is the one validated on real 1993 hardware/emulation. The 
 - **Text Placer** (`/text-placer`) — Drop crisp NAPLPS font text onto a traced graphic, drag to position over a true-field preview, and export a real `.nap`
 - **NAPLPS Viewer** (`/naplps-viewer`) — Renders real `.nap` files via a low-res raster (ported from TurShow's model), with the TelidonP5 dialect as a legacy toggle
 - **NAPLPS import** (`.nap → SVG`) — Decode a real `.nap` back into editable SVG
-- **Authoring tool** (`/author`) — Canvas-based shape editor with flood-fill pick, simplification, and SVG import
+- **Optimizer** (`/optimizer`) — Import a real `.nap`, merge near-duplicate colors to the palette, click shapes in the viewer to select/prune overdraw, reorder the draw stack, and re-export a smaller real `.nap` with live before/after stats
 - **Download** — Binary `.nap` or hex `.txt`
 
 ---
@@ -126,9 +136,10 @@ src/
 │   ├── page.tsx                # Main converter + .nap import
 │   ├── text-placer/page.tsx    # Font-text placement UI → real .nap
 │   ├── naplps-viewer/page.tsx  # Raster + TelidonP5 viewer
-│   ├── author/page.tsx         # Canvas shape editor
+│   ├── optimizer/page.tsx      # Cleanup/optimizer: import .nap, merge colors, prune shapes, re-export
 │   └── layout.tsx
 ├── components/
+│   ├── AppHeader.tsx           # Shared top navigation
 │   ├── FileUpload.tsx          # Drag-and-drop upload
 │   └── SvgAccuracyTest.tsx
 └── lib/

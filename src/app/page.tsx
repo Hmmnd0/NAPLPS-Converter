@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import AppHeader from '@/components/AppHeader';
 import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
@@ -270,37 +270,23 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        {/* Viewer Button */}
-        <div className="flex justify-end gap-3 mb-4">
-          <a
-            href="/text-placer"
-            className="px-6 py-2 bg-amber-600 text-white rounded-lg font-semibold shadow hover:bg-amber-700 transition-colors"
-          >
-            Text Placer
-          </a>
-          <a
-            href="/naplps-viewer"
-            className="px-6 py-2 bg-purple-700 text-white rounded-lg font-semibold shadow hover:bg-purple-800 transition-colors"
-          >
-            Open NAPLPS Viewer
-          </a>
-        </div>
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <AppHeader />
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
+        {/* Hero */}
+        <div className="text-center mb-10">
+          <span className="inline-block mb-3 text-xs font-medium tracking-wide uppercase text-indigo-600">
+            Videotex &amp; Telidon toolkit
+          </span>
+          <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-zinc-900">
             NAPLPS Converter
           </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Convert PNG images to NAPLPS (North American Presentation Layer Protocol Syntax) format.
-            This tool analyzes images and converts them to vector graphics primitives used in vintage
-            teletext and videotex systems.
+          <p className="mt-4 text-lg text-zinc-500 max-w-2xl mx-auto">
+            Turn PNG and SVG images into NAPLPS vector graphics — the format behind 1980s
+            videotex systems like Prodigy and Telidon. Export real, period-tool-readable
+            <code className="mx-1 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-700 text-sm font-mono">.nap</code>
+            files.
           </p>
-          <Link href="/author"
-            className="inline-block mt-3 px-4 py-1.5 bg-gray-800 text-white text-sm rounded hover:bg-gray-700 transition-colors">
-            Authoring Tool (trace shapes manually)
-          </Link>
         </div>
 
         {/* File Upload */}
@@ -316,7 +302,7 @@ export default function Home() {
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${processingProgress * 100}%` }}
                 ></div>
               </div>
@@ -367,7 +353,7 @@ export default function Home() {
               </div>
               {svgString && (
                 <button
-                  className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  className="btn-ghost w-full mt-4"
                   onClick={() => {
                     const svgWithHeader = `<?xml version="1.0" encoding="UTF-8"?>\n${svgString}`;
                     downloadText(svgWithHeader, 'output.svg', 'image/svg+xml');
@@ -378,7 +364,7 @@ export default function Home() {
               )}
               <div className="mt-4 space-y-2">
                 <button
-                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="btn-primary w-full"
                   onClick={handleConvertToNaplps}
                   disabled={!svgReady || isNaplpsProcessing}
                 >
@@ -407,7 +393,7 @@ export default function Home() {
                     )}
                     <button
                       onClick={() => downloadText(naplpsData, 'naplps_output.txt')}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      className="btn-ghost w-full"
                     >
                       Download NAPLPS File
                     </button>
@@ -420,14 +406,14 @@ export default function Home() {
                         }
                         downloadBinary(hexToBytes(hex), 'naplps_output.nap');
                       }}
-                      className="w-full mt-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      className="btn-neutral w-full mt-2"
                     >
                       Download NAPLPS (.nap) <span className="opacity-75">— TelidonP5 dialect</span>
                     </button>
                     {svgString && (
                       <button
                         onClick={() => downloadStandardNap(svgString, 'naplps_output_standard')}
-                        className="w-full mt-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                        className="btn-accent w-full mt-2"
                       >
                         Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
                       </button>
@@ -459,13 +445,13 @@ export default function Home() {
         )}
 
         {/* SVG → NAP Direct Upload */}
-        <div className="mt-12 bg-white rounded-lg shadow-sm p-6">
+        <div className="mt-12 card p-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">SVG → NAPLPS (Direct Upload)</h2>
           <p className="text-sm text-gray-500 mb-6">
             Already have an SVG? Upload it directly to convert to a .nap file — no PNG required.
           </p>
 
-          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-zinc-300 rounded-xl cursor-pointer bg-zinc-50 hover:bg-zinc-100 transition-colors">
             <span className="text-gray-500 text-sm mb-1">
               {svgUploadFilename ? svgUploadFilename : 'Click or drag an SVG file here'}
             </span>
@@ -495,7 +481,7 @@ export default function Home() {
                   />
                 </div>
                 <button
-                  className="mt-4 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="btn-primary w-full mt-4"
                   onClick={handleSvgUploadConvert}
                   disabled={isSvgUploadProcessing}
                 >
@@ -515,7 +501,7 @@ export default function Home() {
                       {Math.floor(svgUploadNaplpsData.length / 2)} bytes
                     </p>
                     <button
-                      className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      className="btn-neutral w-full"
                       onClick={() => {
                         const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
                         downloadBinary(hexToBytes(svgUploadNaplpsData), `${base}.nap`);
@@ -524,13 +510,13 @@ export default function Home() {
                       Download .nap <span className="opacity-75">— TelidonP5 dialect</span>
                     </button>
                     <button
-                      className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                      className="btn-accent w-full"
                       onClick={() => downloadStandardNap(svgUploadString, (svgUploadFilename.replace(/\.svg$/i, '') || 'output') + '_standard')}
                     >
                       Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
                     </button>
                     <button
-                      className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      className="btn-ghost w-full"
                       onClick={() => {
                         const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
                         downloadText(svgUploadNaplpsData, `${base}_naplps.txt`);
@@ -552,14 +538,14 @@ export default function Home() {
         </div>
 
         {/* Import real NAPLPS (.nap → SVG) */}
-        <div className="mt-12 bg-white rounded-lg shadow-sm p-6">
+        <div className="mt-12 card p-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Import NAPLPS (.nap → SVG)</h2>
           <p className="text-sm text-gray-500 mb-6">
             Decode a <em>real</em> NAPLPS file (period videotex art, BBS-era <code>.nap</code>) into
             SVG. Handles standard interleaved coordinates, the indexed palette, polygons, lines and points.
           </p>
 
-          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+          <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-zinc-300 rounded-xl cursor-pointer bg-zinc-50 hover:bg-zinc-100 transition-colors">
             <span className="text-gray-500 text-sm mb-1">
               {napImportName ? napImportName : 'Click or drag a .nap file here'}
             </span>
@@ -578,7 +564,7 @@ export default function Home() {
                   dangerouslySetInnerHTML={{ __html: napImportSvg }}
                 />
                 <button
-                  className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  className="btn-ghost w-full mt-4"
                   onClick={() => {
                     const base = napImportName.replace(/\.nap$/i, '') || 'imported';
                     downloadText(`<?xml version="1.0" encoding="UTF-8"?>\n${napImportSvg}`, `${base}.svg`, 'image/svg+xml');
@@ -613,9 +599,9 @@ export default function Home() {
         )}
 
         {/* Information */}
-        <div className="mt-12 bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">About NAPLPS</h3>
-          <div className="prose prose-sm text-gray-600">
+        <div className="mt-12 card p-6">
+          <h3 className="text-lg font-semibold text-zinc-900 mb-4">About NAPLPS</h3>
+          <div className="prose prose-sm text-zinc-500">
             <p>
               NAPLPS (North American Presentation Layer Protocol Syntax) was a graphics language
               developed in the 1980s for videotex and teletext services. It was used by services

@@ -66,6 +66,42 @@ The PNG→SVG pipeline only produces `<rect>` elements. All other shape types (`
 
 ---
 
+## Phase 6 — Real Standard NAPLPS ✅ Complete
+
+The encoder/decoder in earlier phases emit the app's own **TelidonP5 dialect**. This phase added a parallel **standard (real) NAPLPS** stack, validated against the 1993 DOS viewer TurShow under DOSBox-X.
+
+- [x] `naplps-std-decoder.ts` — reads real `.nap` (interleaved coordinates, indexed 16-slot palette + period default colormap, polygons/lines/points, arcs → circles)
+- [x] `naplps-std-encoder.ts` — exact inverse: period header, `SELECT`/`SET COLOR` palette, `SET & POLY FILLED` with absolute + relative deltas; round-trip is bit-exact on most fixtures
+- [x] `naplpsToSvg.ts` — real `.nap` → SVG (auto-fit viewBox); powers the "Import NAPLPS (.nap → SVG)" panel
+- [x] `naplpsRaster.ts` — low-res framebuffer renderer ported from TurShow's model (scanline fill + boundary pixels + seam-seal); the viewer's Standard mode
+- [x] `svgToNaplpsStandard` — full PNG/SVG → real `.nap` pipeline ("Download standard .nap" buttons)
+- [x] Validated in real TurShow (eagle / santa / MadMaze render faithfully)
+
+---
+
+## Phase 7 — Font Text & Text Placer ✅ Complete
+
+- [x] `TEXT` / `FIELD` / SI font-text encoding in the standard encoder (crisp period letterforms, not traced glyphs)
+- [x] **Text Placer** (`/text-placer`) — drag font-text blocks over a true-field raster preview; edit lines/position/size/color; export a real `.nap`
+- [x] `rasterizeNaplps` gained a `fieldHeight` mode (absolute-field projection) so overlays register with the graphic
+
+---
+
+## Phase 8 — Cleanup & UI Modernization ✅ Complete
+
+- [x] Removed the legacy "ASCII-Safe" encoder path: `NAPLPSEncoder`, `svgToNaplps`, its rect-only helpers, and the dead generators; `naplps.ts` is now types-only (commit `be3f9b5`)
+- [x] Rewrote `README.md` for the current app, with a TurShow/DOSBox testing section (no binary redistributed)
+- [x] Modern clean-light UI across all pages: a shared `AppHeader` nav, a consistent card/button design system in `globals.css`, and redesigned Converter / Text Placer / Viewer screens
+- [x] Refactored the Authoring tool into a **NAPLPS Optimizer** (`/optimizer`): import a real `.nap` (std decoder), merge near-duplicate colors to the 16-slot palette (threshold slider), prune overdraw shapes, reorder the draw stack, live raster preview + before/after stats (shapes/colors/bytes), re-export real `.nap`. Removed the old `/author` canvas editor (a foxtoolbox-dialect consumer)
+
+---
+
+## Future Ideas
+
+- **Weather frames** — fetch live data (e.g. NWS `api.weather.gov`) and compose NAPLPS weather pages (text + simple icons over a base map) — the canonical videotex application. Mostly reuses the standard encoder + font-text path; main new work is a layout/template module and a small icon set. (Open question: the degree symbol `°` needs G2-charset support — the TEXT path currently filters to ASCII.)
+
+---
+
 ## Future Project — NAPLPS Vectorizer
 
 A separate project that builds on this converter's encoder stack to produce period-accurate file sizes from raster images. Key additions:
@@ -84,5 +120,6 @@ For Telidon-era content (bitmap fonts on solid backgrounds, simple vector graphi
 The following are working correctly and should not be changed without a clear bug report:
 
 - `naplps-foxtoolbox.ts` — 4-byte GRBGRB color encoding, 12-bit coordinate packing, SET & POLY FILLED (0x37) for rectangles
+- `naplps-std-encoder.ts` / `naplps-std-decoder.ts` — coordinate interleaving + indexed-palette logic, validated against real `.nap` fixtures and TurShow; only change with a failing fixture
 - `public/telidon/TelidonP5.js` — decoder and renderer (third-party, patched once for color propagation bug)
 - Color quantization in `pixelToSvg.ts` — fragile but working; only change if a specific image reproduces a color problem
