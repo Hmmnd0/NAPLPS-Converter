@@ -8,10 +8,12 @@ export default function SvgAccuracyTest() {
   const [svgOutput, setSvgOutput] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
 
   const handleTestImage = async (file: File) => {
     setIsProcessing(true);
     setError('');
+    setFileName(file.name);
     
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -31,25 +33,31 @@ export default function SvgAccuracyTest() {
   };
 
   return (
-    <div className="p-4 border rounded-lg bg-gray-50">
-      <h3 className="text-lg font-semibold mb-4">SVG Accuracy Test</h3>
-      
-      <input
-        type="file"
-        accept="image/png"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleTestImage(file);
-        }}
-        className="mb-4"
-      />
-      
+    <div className="card p-6">
+      <h3 className="text-lg font-semibold text-zinc-900 mb-4">SVG Accuracy Test</h3>
+
+      <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-zinc-300 rounded-xl cursor-pointer bg-zinc-50 hover:bg-zinc-100 transition-colors">
+        <span className="text-zinc-500 text-sm mb-1">
+          {fileName ? fileName : 'Click or drag a PNG file here'}
+        </span>
+        <span className="text-xs text-zinc-400">.png files only</span>
+        <input
+          type="file"
+          accept="image/png"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleTestImage(file);
+          }}
+        />
+      </label>
+
       {error && (
-        <div className="text-red-600 mb-4">{error}</div>
+        <div className="text-red-600 mt-4">{error}</div>
       )}
-      
+
       {isProcessing && (
-        <div className="text-blue-600 mb-4">Processing...</div>
+        <div className="text-indigo-600 mt-4">Processing...</div>
       )}
       
       {testImage && svgOutput && (

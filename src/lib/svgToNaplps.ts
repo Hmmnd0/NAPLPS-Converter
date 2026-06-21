@@ -1,5 +1,4 @@
 import { NAPLPSColor } from './naplps';
-import { NAPLPSFoxtoolboxEncoder } from './naplps-foxtoolbox';
 import { encodeNaplpsStandard, NapText } from './naplps-std-encoder';
 import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
 
@@ -576,98 +575,8 @@ export function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
   return cur;
 }
 
-export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, height: number): Promise<string> {
-  try {
-    const { doc, cssMap } = parseSvgDocument(svgString);
-    let rectangles = parseSvgToPixels(doc, cssMap);
-    const rectsBefore = rectangles.length;
-    const polygons = parseSvgToPolygons(doc, cssMap);
-    const circles  = parseSvgToCirclesAndEllipses(doc, cssMap);
-    const { rects: pathRects, polygons: paths } = parseSvgToPaths(doc, cssMap);
-    // Merge all rects together (native + recovered from paths) in one pass
-    rectangles = optimizeRectangles([...rectangles, ...pathRects]);
-
-    if (DEBUG_SVG_NAPLPS) {
-      console.log('[svgToNaplps] shape counts:', {
-        rects_raw: rectsBefore,
-        rects_from_paths: pathRects.length,
-        rects_merged: rectangles.length,
-        polygons: polygons.length,
-        circles_ellipses: circles.length,
-        path_polygons: paths.length,
-      });
-    }
-
-    if (rectangles.length === 0 && polygons.length === 0 && circles.length === 0 && paths.length === 0) {
-      throw new Error('SVG contains no supported shapes (<rect>, <polygon>, <polyline>, <circle>, <ellipse>, <path>) — output would be empty.');
-    }
-
-    const encoder = new NAPLPSFoxtoolboxEncoder();
-
-    // Sort by color so we minimize setColor calls (one per unique color instead of one per rect)
-    rectangles.sort((a, b) => (a.color < b.color ? -1 : a.color > b.color ? 1 : 0));
-
-    let lastColorKey = '';
-    for (const rect of rectangles) {
-      if (rect.color !== lastColorKey) {
-        encoder.setColor(parseColor(rect.color));
-        lastColorKey = rect.color;
-      }
-      encoder.addFilledRectangle(
-        { x: rect.x / width, y: rect.y / height },
-        { x: (rect.x + rect.width) / width, y: (rect.y + rect.height) / height }
-      );
-    }
-
-    let totalPointsBefore = 0, totalPointsAfter = 0;
-
-    for (const shape of polygons) {
-      const simplified = dpSimplify(shape.points, DP_TOLERANCE);
-      if (DEBUG_SVG_NAPLPS) {
-        totalPointsBefore += shape.points.length;
-        totalPointsAfter += simplified.length;
-        console.log(`[svgToNaplps] polygon: color=${shape.color} pts ${shape.points.length}→${simplified.length}`);
-      }
-      if (simplified.length < 3) continue;
-      encoder.setColor(parseColor(shape.color));
-      encoder.addPolygon(simplified.map(p => ({ x: p.x / width, y: p.y / height })));
-    }
-
-    for (const shape of circles) {
-      // Circles are already 24-point approximations — no simplification needed
-      if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] circle/ellipse: color=${shape.color} points=${shape.points.length}`);
-      encoder.setColor(parseColor(shape.color));
-      encoder.addPolygon(shape.points.map(p => ({ x: p.x / width, y: p.y / height })));
-    }
-
-    for (const shape of paths) {
-      const simplified = dpSimplify(shape.points, DP_TOLERANCE);
-      if (DEBUG_SVG_NAPLPS) {
-        totalPointsBefore += shape.points.length;
-        totalPointsAfter += simplified.length;
-        console.log(`[svgToNaplps] path polygon: color=${shape.color} pts ${shape.points.length}→${simplified.length}`);
-      }
-      if (simplified.length < 3) continue;
-      encoder.setColor(parseColor(shape.color));
-      encoder.addPolygon(simplified.map(p => ({ x: p.x / width, y: p.y / height })));
-    }
-
-    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] polygon points total: ${totalPointsBefore} → ${totalPointsAfter} (${((1 - totalPointsAfter / totalPointsBefore) * 100).toFixed(1)}% reduction)`);
-
-    encoder.endGraphics();
-    const hexResult = encoder.getHexString();
-    if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] output bytes: ${hexResult.length / 2}`);
-    return hexResult;
-  } catch (error) {
-    console.error('Error in svgToNaplpsFoxtoolbox:', error);
-    throw error;
-  }
-}
-
 // Convert an SVG (e.g. from a traced PNG) into a REAL standard NAPLPS .nap byte
-// stream — interleaved coordinates + indexed palette, readable by period tools —
-// using the standard encoder. This is the counterpart to svgToNaplpsFoxtoolbox,
-// which emits the app's own TelidonP5 dialect instead.
+// stream — interleaved coordinates + indexed palette, readable by period tools.
 export async function svgToNaplpsStandard(
   svgString: string,
   width: number,

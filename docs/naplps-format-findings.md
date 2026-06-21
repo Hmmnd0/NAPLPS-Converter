@@ -5,20 +5,26 @@ Reverse-engineered from period DOS tools (Ghidra-decompiled to
 (`JP NAPLPS Source Files/rhsrv43a/PDISET.C`, clean C), and **real `.nap` files**
 shipped with those tools (`MGE201A/*.NAP`, `NAPICO11/*.NAP`, `NAPWMF08/*.NAP`).
 
-## TL;DR — our converter emits a non-standard dialect
+## TL;DR — the project is standard / real NAPLPS only
 
-Our encoder (`naplps-foxtoolbox.ts`) was reverse-engineered from TelidonP5.js. It
-works **with that one viewer**, but it does **not** match the NAPLPS standard that
-real period files and decoders use. Two concrete divergences:
+The codebase produces and reads **real NAPLPS** via `naplps-std-encoder.ts` +
+`naplps-std-decoder.ts` (with `naplpsRaster.ts` and `naplpsToSvg.ts`) —
+interleaved coordinates and an indexed 16-slot palette, **validated against real
+`.nap` files and the 1993 DOS viewer TurShow**.
+
+> **History:** the app originally shipped a non-standard **TelidonP5 "foxtoolbox"
+> dialect** (`naplps-foxtoolbox.ts` + `naplps-decoder.ts` + a bundled TelidonP5.js
+> viewer) — the only in-browser render path before real NAPLPS was reverse-
+> engineered. It has since been **removed**; the notes below explain the
+> divergences that motivated building the standard stack that replaced it.
 
 1. **Coordinates.** Real NAPLPS *interleaves* X and Y bits inside every operand
-   byte. We write X as two whole bytes then Y as two whole bytes (separate).
+   byte. The old foxtoolbox dialect wrote X as two whole bytes then Y as two whole
+   bytes (separate). The standard encoder does the real interleaving.
 2. **Color.** Real files use an indexed palette: define 16 slots once with
-   `SET-COLOR` (0x3C), then pick a slot per shape with `SELECT-COLOR` (0x3E). We
-   emit a full RGB `SET-COLOR` before every shape and never use `SELECT-COLOR`.
-
-Consequence: our in-repo decoder (`naplps-decoder.ts`) only knows 4 opcodes and
-**cannot read any real `.nap` file**.
+   `SET-COLOR` (0x3C), then pick a slot per shape with `SELECT-COLOR` (0x3E). The
+   old dialect emitted a full RGB `SET-COLOR` before every shape and never used
+   `SELECT-COLOR`. The standard encoder uses the indexed palette.
 
 ## Command-frequency survey (9 real files)
 
@@ -87,16 +93,36 @@ reads `EAGLE1.NAP` correctly:
 0x37 SET&POLY-FILLED ops=64  (0.236,0.649) ...   # 16 vertices
 ```
 
-## Recommendations for the converter
+## Visible field & coordinate placement
 
-1. **New standard decoder** (`naplps-std-decoder.ts`): read real `.nap` files →
-   shapes, using `getnum` interleaving + DOMAIN state + the palette model. Test
-   against the real sample files. Highest value — gives the project genuine
-   interoperability with period content. Keep the existing `naplps-decoder.ts`
-   (it decodes our own TelidonP5-dialect output for round-trip tests).
-2. **Encoder roadmap, reprioritized by real usage:** lines (`PT-SET-ABS` +
-   `LINE-REL`) and the indexed palette (`SELECT-COLOR`) matter far more than the
-   filled-rect path we built. Arcs/text are secondary.
-3. **Do NOT change `naplps-foxtoolbox.ts`** to "fix" the coordinate format — it is
-   matched to the TelidonP5 viewer that the app ships and relies on. A
-   standard-compliant encoder, if wanted, should be a separate module.
+NAPLPS works in a 0..1 unit square (Y up), but period viewers (TurShow) display
+only the **4:3 area** up to **Y ≈ 0.75** — content above that is clipped off the
+top. So when mapping a raster/SVG into the field, the converter fits the source,
+preserving aspect, into a margined box `[m, fieldH-m]` (default `m=0.03`,
+`fieldH=0.75`) and centers it (letterbox), rather than stretching to the full
+square. This is why the Text Placer's preview is rendered at this 4:3 field and
+why a reference image must be placed in the *same* letterboxed rectangle as the
+`.nap` content (not stretched edge-to-edge) to align.
+
+`naplpsRaster.ts` can project either the content bounding box (default viewer) or
+the absolute field (`fieldHeight` option) — the latter keeps art at true field
+coordinates so overlays (e.g. placed font text) register exactly.
+
+## Status — standard stack implemented ✅
+
+The recommendations below were built:
+
+1. **Standard decoder** (`naplps-std-decoder.ts`) — reads real `.nap` →
+   shapes via `getnum` interleaving + DOMAIN state + the indexed-palette model;
+   tested against real sample files. `naplps-decoder.ts` is kept only for
+   foxtoolbox-dialect round-trip tests.
+2. **Standard encoder** (`naplps-std-encoder.ts`) — exact inverse: indexed
+   palette (`SELECT-COLOR`/`SET-COLOR`), `SET&POLY-FILLED` with abs + relative
+   deltas, plus `TEXT`/`FIELD` font text. Round-trip is bit-exact on most
+   fixtures. Drives the Converter (its only output now), the Text Placer, and the
+   Optimizer.
+3. **Raster renderer** (`naplpsRaster.ts`) — ports TurShow's low-res framebuffer
+   model (scanline fill + boundary pixels + seam-seal); the Viewer's renderer.
+
+The TelidonP5 "foxtoolbox" dialect and its bundled viewer have been **removed** —
+the app is now single-format (real NAPLPS) end to end.

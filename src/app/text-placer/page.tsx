@@ -99,10 +99,40 @@ export default function TextPlacer() {
   const [graphicUrl, setGraphicUrl] = useState<string>("");
   const [error, setError] = useState<string>("");
 
+  const [refUrl, setRefUrl] = useState<string>("");      // optional reference image shown under the graphic
+  const [refDims, setRefDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [graphicOpacity, setGraphicOpacity] = useState(1); // fade the traced graphic to align against the reference
+
   const previewRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: number; dxField: number; dyField: number } | null>(null);
+  const dragRef = useRef<{ id: number; dxField: number; dyField: number; moved: boolean } | null>(null);
 
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
+
+  // ── Undo: snapshot the blocks state before each edit gesture ───────────────
+  const [history, setHistory] = useState<TextBlock[][]>([]);
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  const snapshot = () => setHistory((h) => [...h, blocksRef.current].slice(-100));
+  const undo = useCallback(() => {
+    setHistory((h) => {
+      if (!h.length) return h;
+      setBlocks(h[h.length - 1]);
+      setSelectedId(null);
+      return h.slice(0, -1);
+    });
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // leave native undo in fields
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo]);
 
   const updateBlock = useCallback((id: number, patch: Partial<TextBlock>) => {
     setBlocks((bs) => bs.map((b) => (b.id === id ? { ...b, ...patch } : b)));
@@ -169,13 +199,14 @@ export default function TextPlacer() {
     e.preventDefault();
     setSelectedId(b.id);
     const { fx, fy } = fieldFromEvent(e.clientX, e.clientY);
-    dragRef.current = { id: b.id, dxField: b.x - fx, dyField: b.y - fy };
+    dragRef.current = { id: b.id, dxField: b.x - fx, dyField: b.y - fy, moved: false };
   };
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const d = dragRef.current;
       if (!d || !previewRef.current) return;
+      if (!d.moved) { d.moved = true; snapshot(); } // record pre-drag state once, for undo
       const { fx, fy } = fieldFromEvent(e.clientX, e.clientY);
       const x = Math.min(1, Math.max(0, fx + d.dxField));
       const y = Math.min(FIELD_H, Math.max(0, fy + d.dyField));
@@ -193,25 +224,67 @@ export default function TextPlacer() {
   }, [updateBlock]);
 
   const addBlock = () => {
+    snapshot();
     const b = mkBlock({ text: "New text", x: 0.2, y: 0.6 });
     setBlocks((bs) => [...bs, b]);
     setSelectedId(b.id);
   };
   const duplicateBlock = (b: TextBlock) => {
+    snapshot();
     const copy = mkBlock({ ...b, x: Math.min(1, b.x + 0.02), y: Math.max(0, b.y - 0.02) });
     setBlocks((bs) => [...bs, copy]);
     setSelectedId(copy.id);
   };
   const deleteBlock = (id: number) => {
+    snapshot();
     setBlocks((bs) => bs.filter((b) => b.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
   const loadMadMaze = () => {
+    snapshot();
     const bs = MADMAZE_BLOCKS.map(mkBlock);
     setBlocks(bs);
     setSelectedId(bs[0]?.id ?? null);
     setExcludeBlack(true);
   };
+
+  // Optional reference image shown beneath the traced graphic, for aligning text
+  // to the original artwork. Stretched to the field like the graphic.
+  const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const url = String(ev.target?.result ?? "");
+      const img = new Image();
+      img.onload = () => setRefDims({ width: img.naturalWidth, height: img.naturalHeight });
+      img.src = url;
+      setRefUrl(url);
+    };
+    reader.onerror = () => setError("Could not read reference image.");
+    reader.readAsDataURL(file);
+  };
+
+  // Place the reference image in the exact field rectangle the graphic occupies,
+  // mirroring svgToNaplpsStandard's isotropic letterbox fit (margin 0.03 inside
+  // the 4:3 visible field). Uses the SVG's dimensions when loaded so the
+  // reference lands precisely on the .nap content; otherwise fits by its own size.
+  const refStyle: React.CSSProperties = (() => {
+    const d = dims.width ? dims : refDims;
+    if (!d.width || !d.height) return { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" };
+    const m = 0.03, boxW = 1 - 2 * m, boxH = FIELD_H - 2 * m;
+    const ppu = Math.max(d.width / boxW, d.height / boxH);
+    const cw = d.width / ppu, ch = d.height / ppu;
+    const xOff = m + (boxW - cw) / 2, yOff = m + (boxH - ch) / 2;
+    return {
+      position: "absolute",
+      left: `${xOff * 100}%`,
+      top: `${(1 - (yOff + ch) / FIELD_H) * 100}%`,
+      width: `${cw * 100}%`,
+      height: `${(ch / FIELD_H) * 100}%`,
+      objectFit: "fill",
+    };
+  })();
 
   const download = async () => {
     if (!svgString) {
@@ -297,17 +370,22 @@ export default function TextPlacer() {
             <div
               ref={previewRef}
               className="relative w-full bg-black rounded-lg overflow-hidden shadow-inner select-none"
-              style={{
-                aspectRatio: `${1 / FIELD_H}`,
-                containerType: "size",
-                backgroundImage: graphicUrl ? `url(${graphicUrl})` : undefined,
-                backgroundSize: "100% 100%",
-                imageRendering: "auto",
-              }}
+              style={{ aspectRatio: `${1 / FIELD_H}`, containerType: "size" }}
             >
-              {!svgString && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm px-6 text-center">
-                  Upload an SVG graphic to begin. Text blocks below are shown over a black field until then.
+              {/* reference image (bottom), then the traced graphic (fadeable), then text */}
+              {refUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={refUrl} alt="reference" className="pointer-events-none" style={refStyle} />
+              )}
+              {graphicUrl && (
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{ backgroundImage: `url(${graphicUrl})`, backgroundSize: "100% 100%", opacity: graphicOpacity }}
+                />
+              )}
+              {!svgString && !refUrl && (
+                <div className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm px-6 text-center">
+                  Upload an SVG graphic (and optionally a reference image) to begin. Text blocks are shown over a black field until then.
                 </div>
               )}
               {blocks.map(renderBlock)}
@@ -323,24 +401,33 @@ export default function TextPlacer() {
                 <input type="file" accept=".svg,image/svg+xml" onChange={handleSvgUpload} className="hidden" />
               </label>
               {svgName && (
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-zinc-600">
                   {svgName} {dims.width ? `(${dims.width}×${dims.height})` : ""}
                 </span>
               )}
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+              <label className="btn-ghost cursor-pointer">
+                {refUrl ? "Change reference" : "Upload reference image"}
+                <input type="file" accept="image/*" onChange={handleRefUpload} className="hidden" />
+              </label>
+              {refUrl && (
+                <button onClick={() => setRefUrl("")} className="text-sm text-zinc-400 hover:text-zinc-700">
+                  Remove reference
+                </button>
+              )}
+              <label className="flex items-center gap-2 text-sm text-zinc-700">
                 <input type="checkbox" checked={excludeBlack} onChange={(e) => setExcludeBlack(e.target.checked)} />
                 Drop black shapes (removes traced text)
               </label>
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+              {refUrl && graphicUrl && (
+                <label className="flex items-center gap-2 text-sm text-zinc-700">
+                  Graphic opacity
+                  <input type="range" min={0} max={100} value={Math.round(graphicOpacity * 100)} onChange={(e) => setGraphicOpacity(+e.target.value / 100)} />
+                  {Math.round(graphicOpacity * 100)}%
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-sm text-zinc-700">
                 Preview res
-                <input
-                  type="range"
-                  min={128}
-                  max={512}
-                  step={32}
-                  value={resolution}
-                  onChange={(e) => setResolution(+e.target.value)}
-                />
+                <input type="range" min={128} max={512} step={32} value={resolution} onChange={(e) => setResolution(+e.target.value)} />
                 {resolution}px
               </label>
             </div>
@@ -349,6 +436,9 @@ export default function TextPlacer() {
           {/* ── Panel ───────────────────────────────────────────────────── */}
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
+              <button onClick={undo} disabled={history.length === 0} className="btn-ghost" title="Undo (⌘Z)">
+                ↶ Undo
+              </button>
               <button onClick={addBlock} className="btn-ghost">
                 + Add text
               </button>
@@ -389,7 +479,7 @@ export default function TextPlacer() {
 
             {/* Editor for the selected block */}
             {selected && (
-              <div className="border rounded-lg p-3 space-y-3 bg-white">
+              <div className="border border-zinc-200 rounded-lg p-3 space-y-3 bg-white" onFocusCapture={snapshot}>
                 <h3 className="font-semibold text-sm text-gray-700">Edit block</h3>
                 <textarea
                   value={selected.text}

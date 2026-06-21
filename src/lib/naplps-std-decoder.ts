@@ -1,7 +1,6 @@
 // Standard NAPLPS decoder — reads REAL period .nap files into shapes.
 //
-// Unlike naplps-decoder.ts (which reads our own TelidonP5-dialect output), this
-// implements the actual NAPLPS / T.101 wire format reverse-engineered from period
+// Implements the actual NAPLPS / T.101 wire format reverse-engineered from period
 // tools (RHINO/PDISET.C, decompiled TURSHOW/MGEEXE) and validated against real
 // .nap sample files. See docs/naplps-format-findings.md.
 //

@@ -5,7 +5,7 @@ import AppHeader from '@/components/AppHeader';
 import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
-import { svgToNaplpsFoxtoolbox, svgToNaplpsStandard, getConversionStats } from '@/lib/svgToNaplps';
+import { svgToNaplpsStandard, getConversionStats } from '@/lib/svgToNaplps';
 import { naplpsToSvg } from '@/lib/naplpsToSvg';
 
 // ─── Download helpers ─────────────────────────────────────────────────────────
@@ -17,6 +17,10 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i / 2] = parseInt(clean.substr(i, 2), 16);
   }
   return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function downloadBinary(bytes: Uint8Array, filename: string) {
@@ -151,8 +155,8 @@ export default function Home() {
           return;
         }
         try {
-          const naplps = await svgToNaplpsFoxtoolbox(svgString, img.width, img.height);
-          setNaplpsData(naplps);
+          const bytes = await svgToNaplpsStandard(svgString, img.width, img.height);
+          setNaplpsData(bytesToHex(bytes));
           const stats = getConversionStats(svgString);
           setConversionStats(stats);
         } catch (naplpsErr) {
@@ -211,36 +215,12 @@ export default function Home() {
         setIsSvgUploadProcessing(false);
         return;
       }
-      const naplps = await svgToNaplpsFoxtoolbox(svgUploadString, width, height);
-      setSvgUploadNaplpsData(naplps);
+      const bytes = await svgToNaplpsStandard(svgUploadString, width, height);
+      setSvgUploadNaplpsData(bytesToHex(bytes));
     } catch (err) {
       setSvgUploadError('Conversion failed: ' + (err instanceof Error ? err.message : String(err)));
     }
     setIsSvgUploadProcessing(false);
-  };
-
-  // Read an SVG's pixel dimensions from its viewBox or width/height attributes.
-  const extractSvgDims = (svg: string): { width: number; height: number } => {
-    const el = new DOMParser().parseFromString(svg, 'image/svg+xml').querySelector('svg');
-    let width = 0, height = 0;
-    const vb = el?.getAttribute('viewBox');
-    if (vb) { const p = vb.trim().split(/[\s,]+/); width = parseFloat(p[2]) || 0; height = parseFloat(p[3]) || 0; }
-    if (!width) width = parseFloat(el?.getAttribute('width') || '0');
-    if (!height) height = parseFloat(el?.getAttribute('height') || '0');
-    return { width, height };
-  };
-
-  // Export the current SVG as a REAL standard NAPLPS .nap (period-tool readable),
-  // using the standard encoder rather than the app's TelidonP5 dialect.
-  const downloadStandardNap = async (svg: string, baseName: string) => {
-    try {
-      const { width, height } = extractSvgDims(svg);
-      if (!width || !height) { setError('Could not determine SVG dimensions for standard .nap export.'); return; }
-      const bytes = await svgToNaplpsStandard(svg, width, height);
-      downloadBinary(bytes, `${baseName}.nap`);
-    } catch (e) {
-      setError('Standard .nap export failed: ' + (e instanceof Error ? e.message : String(e)));
-    }
   };
 
   const handleNapImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -392,32 +372,17 @@ export default function Home() {
                       </div>
                     )}
                     <button
-                      onClick={() => downloadText(naplpsData, 'naplps_output.txt')}
-                      className="btn-ghost w-full"
+                      onClick={() => downloadBinary(hexToBytes(naplpsData), 'naplps_output.nap')}
+                      className="btn-accent w-full"
                     >
-                      Download NAPLPS File
+                      Download .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
                     </button>
                     <button
-                      onClick={() => {
-                        const hex = naplpsData.replace(/\s+/g, '');
-                        if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
-                          setError('Cannot export binary: NAPLPS data is empty or invalid.');
-                          return;
-                        }
-                        downloadBinary(hexToBytes(hex), 'naplps_output.nap');
-                      }}
-                      className="btn-neutral w-full mt-2"
+                      onClick={() => downloadText(naplpsData, 'naplps_output.txt')}
+                      className="btn-ghost w-full mt-2"
                     >
-                      Download NAPLPS (.nap) <span className="opacity-75">— TelidonP5 dialect</span>
+                      Download hex (.txt)
                     </button>
-                    {svgString && (
-                      <button
-                        onClick={() => downloadStandardNap(svgString, 'naplps_output_standard')}
-                        className="btn-accent w-full mt-2"
-                      >
-                        Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
-                      </button>
-                    )}
                     {/* Hex/byte preview */}
                     <div className="mt-4 bg-gray-100 p-2 rounded text-xs font-mono text-gray-700">
                       <div>First 64 bytes (hex):</div>
@@ -501,19 +466,13 @@ export default function Home() {
                       {Math.floor(svgUploadNaplpsData.length / 2)} bytes
                     </p>
                     <button
-                      className="btn-neutral w-full"
+                      className="btn-accent w-full"
                       onClick={() => {
                         const base = svgUploadFilename.replace(/\.svg$/i, '') || 'output';
                         downloadBinary(hexToBytes(svgUploadNaplpsData), `${base}.nap`);
                       }}
                     >
-                      Download .nap <span className="opacity-75">— TelidonP5 dialect</span>
-                    </button>
-                    <button
-                      className="btn-accent w-full"
-                      onClick={() => downloadStandardNap(svgUploadString, (svgUploadFilename.replace(/\.svg$/i, '') || 'output') + '_standard')}
-                    >
-                      Download standard .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
+                      Download .nap <span className="opacity-75">— real NAPLPS (TURSHOW-readable)</span>
                     </button>
                     <button
                       className="btn-ghost w-full"

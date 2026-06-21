@@ -1,5 +1,5 @@
 // Shared NAPLPS value types used across the SVG→NAPLPS encoders
-// (the TelidonP5 "foxtoolbox" dialect and the standard period encoder).
+// (parseColor in svgToNaplps and the standard period encoder/decoder).
 
 export interface NAPLPSPoint {
   x: number;

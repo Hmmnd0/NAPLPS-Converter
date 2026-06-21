@@ -96,6 +96,18 @@ The encoder/decoder in earlier phases emit the app's own **TelidonP5 dialect**. 
 
 ---
 
+## Phase 9 — Standard-only (retire TelidonP5/foxtoolbox) ✅ Complete
+
+The app is now single-format: real NAPLPS end to end.
+
+- [x] Converter outputs **standard `.nap`** only (the hex preview + downloads come from `svgToNaplpsStandard`); dropped the "TelidonP5 dialect" download buttons
+- [x] Viewer is **raster-only** (removed the TelidonP5 toggle, the `renderTelidon` path, and the `/telidon/` script loading)
+- [x] Deleted `naplps-foxtoolbox.ts`, `naplps-decoder.ts` (+ its test), `public/telidon/*`, and the `test-rectangle/` dev page
+- [x] Added **undo** + a **reference-image underlay** (aligned to the graphic's field footprint) to the Text Placer; matched the SvgAccuracyTest dropzone to the other upload boxes
+- [x] Scrubbed README / ROADMAP / findings doc of the dialect
+
+---
+
 ## Future Ideas
 
 - **Weather frames** — fetch live data (e.g. NWS `api.weather.gov`) and compose NAPLPS weather pages (text + simple icons over a base map) — the canonical videotex application. Mostly reuses the standard encoder + font-text path; main new work is a layout/template module and a small icon set. (Open question: the degree symbol `°` needs G2-charset support — the TEXT path currently filters to ASCII.)
@@ -109,7 +121,7 @@ A separate project that builds on this converter's encoder stack to produce peri
 - **Tesseract.js OCR** — detect text regions, emit NAPLPS 0x22 TEXT commands instead of rasterizing characters
 - **Potrace (JS port)** — per-color region isolation → polygon outlines → `addPolygon()` calls
 - **Text/graphics separation** — route detected text regions to OCR, non-text to Potrace
-- Reuses `naplps-foxtoolbox.ts`, `addPolygon()`, and the viewer stack from this project unchanged
+- Reuses the standard encoder (`naplps-std-encoder.ts`) and the raster viewer from this project
 
 For Telidon-era content (bitmap fonts on solid backgrounds, simple vector graphics), this approach could match period file sizes of 350 B – 1.5 KB.
 
@@ -119,7 +131,5 @@ For Telidon-era content (bitmap fonts on solid backgrounds, simple vector graphi
 
 The following are working correctly and should not be changed without a clear bug report:
 
-- `naplps-foxtoolbox.ts` — 4-byte GRBGRB color encoding, 12-bit coordinate packing, SET & POLY FILLED (0x37) for rectangles
 - `naplps-std-encoder.ts` / `naplps-std-decoder.ts` — coordinate interleaving + indexed-palette logic, validated against real `.nap` fixtures and TurShow; only change with a failing fixture
-- `public/telidon/TelidonP5.js` — decoder and renderer (third-party, patched once for color propagation bug)
 - Color quantization in `pixelToSvg.ts` — fragile but working; only change if a specific image reproduces a color problem
