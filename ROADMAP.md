@@ -132,4 +132,4 @@ For Telidon-era content (bitmap fonts on solid backgrounds, simple vector graphi
 The following are working correctly and should not be changed without a clear bug report:
 
 - `naplps-std-encoder.ts` / `naplps-std-decoder.ts` — coordinate interleaving + indexed-palette logic, validated against real `.nap` fixtures and TurShow; only change with a failing fixture
-- Color quantization in `pixelToSvg.ts` — fragile but working; only change if a specific image reproduces a color problem
+- Color quantization (`pixelQuantize.ts`) — popularity-based: keeps a limited source palette **exactly** (≤16 colors → no loss), else bins near-identical colors and takes the most populous, preserving pure colors. Replaced the old median-cut averaging that muddied whites/brights. Covered by `pixelQuantize.test.ts`

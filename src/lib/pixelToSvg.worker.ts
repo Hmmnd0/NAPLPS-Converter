@@ -1,50 +1,6 @@
-// Web Worker: runs median-cut quantization + SVG generation off the main thread
+// Web Worker: runs popularity quantization + SVG generation off the main thread
 
-type RGB = [number, number, number];
-
-function medianCutQuantize(data: Uint8ClampedArray, colorCount: number): RGB[] {
-  const colors: RGB[] = [];
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] > 0) colors.push([data[i], data[i + 1], data[i + 2]]);
-  }
-
-  function getRange(cList: RGB[]): number {
-    let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
-    for (const [r, g, b] of cList) {
-      if (r < rMin) rMin = r; if (r > rMax) rMax = r;
-      if (g < gMin) gMin = g; if (g > gMax) gMax = g;
-      if (b < bMin) bMin = b; if (b > bMax) bMax = b;
-    }
-    const rRange = rMax - rMin, gRange = gMax - gMin, bRange = bMax - bMin;
-    if (rRange >= gRange && rRange >= bRange) return 0;
-    if (gRange >= rRange && gRange >= bRange) return 1;
-    return 2;
-  }
-
-  function quantize(cList: RGB[], depth: number): RGB[] {
-    if (cList.length === 0) return [];
-    if (depth === 0 || cList.length === 1) {
-      const avg = cList.reduce(
-        (acc, c) => [acc[0] + c[0], acc[1] + c[1], acc[2] + c[2]] as RGB,
-        [0, 0, 0] as RGB
-      );
-      return [[
-        Math.round(avg[0] / cList.length),
-        Math.round(avg[1] / cList.length),
-        Math.round(avg[2] / cList.length),
-      ]];
-    }
-    const channel = getRange(cList);
-    cList.sort((a, b) => a[channel] - b[channel]);
-    const mid = Math.floor(cList.length / 2);
-    return [
-      ...quantize(cList.slice(0, mid), depth - 1),
-      ...quantize(cList.slice(mid), depth - 1),
-    ];
-  }
-
-  return quantize(colors, Math.round(Math.log2(colorCount)));
-}
+import { quantizePopularity, type RGB } from './pixelQuantize';
 
 function nearestPaletteColor(palette: RGB[], r: number, g: number, b: number): RGB {
   let minDist = Infinity;
@@ -60,32 +16,8 @@ self.onmessage = (e: MessageEvent<{ buffer: ArrayBuffer; width: number; height: 
   const { buffer, width, height } = e.data;
   const data = new Uint8ClampedArray(buffer);
 
-  // Quantize to 16-color palette
-  const palette = medianCutQuantize(data, 16);
-
-  // Red-preservation patches (same logic as original pixelToSvg.ts)
-  const colors: RGB[] = [];
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] > 0) colors.push([data[i], data[i + 1], data[i + 2]]);
-  }
-
-  // Patch: most saturated red
-  let maxRedScore = -Infinity;
-  let mostRed: RGB = [255, 0, 0];
-  for (const [r, g, b] of colors) {
-    const score = r - g - b;
-    if (score > maxRedScore) { maxRedScore = score; mostRed = [r, g, b]; }
-  }
-  if (!palette.some(([r, g, b]) => r === mostRed[0] && g === mostRed[1] && b === mostRed[2])) {
-    palette[palette.length - 1] = mostRed;
-  }
-
-  // Patch: exact target red #921c12
-  const targetRed: RGB = [146, 28, 18];
-  const foundTargetRed = colors.some(([r, g, b]) => Math.abs(r - 146) < 8 && Math.abs(g - 28) < 8 && Math.abs(b - 18) < 8);
-  if (foundTargetRed && !palette.some(([r, g, b]) => Math.abs(r - 146) < 8 && Math.abs(g - 28) < 8 && Math.abs(b - 18) < 8)) {
-    palette[palette.length - 1] = targetRed;
-  }
+  // Quantize to a 16-color palette (popularity-based — preserves pure colours).
+  const palette = quantizePopularity(data, 16);
 
   // Generate SVG with run-length encoding + vertical merging
   // Active runs: key = "x,w,color" → run object (extended in place as rows match)
