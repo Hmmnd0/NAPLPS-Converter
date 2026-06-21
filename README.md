@@ -1,18 +1,34 @@
 # NAPLPS Converter
 
-A Next.js web application for converting images to **NAPLPS** (North American Presentation Layer Protocol Syntax) — the vector graphics format used by Telidon, Prodigy, and other 1980s videotex systems.
+A Next.js web application for converting images to **NAPLPS** (North American Presentation Layer Protocol Syntax) — the vector graphics format used by Telidon, Prodigy, and other 1980s videotex systems — and for viewing and editing `.nap` files in the browser.
 
-Live viewer powered by [TelidonP5.js](https://github.com/groundh0g/TelidonP5.js).
+It can produce **real, period-tool-readable `.nap` files** (verified against the 1993 DOS viewer TurShow) as well as a TelidonP5-compatible dialect for the built-in browser viewer.
+
+---
+
+## Two NAPLPS dialects
+
+This project encodes/decodes NAPLPS in two flavors. Knowing which is which matters:
+
+| Dialect | Files | Reads in | Use it for |
+|---|---|---|---|
+| **Standard** (real NAPLPS) | `naplps-std-encoder.ts`, `naplps-std-decoder.ts`, `naplpsRaster.ts`, `naplpsToSvg.ts` | Period tools (TurShow), the in-app raster viewer | Authentic `.nap` files: interleaved coordinates, indexed 16-slot palette |
+| **TelidonP5 ("foxtoolbox")** | `naplps-foxtoolbox.ts`, `naplps-decoder.ts` | The bundled [TelidonP5.js](https://github.com/groundh0g/TelidonP5.js) viewer | The app's own simplified dialect (separate X/Y bytes, full-RGB `SET COLOR`) |
+
+The **standard** path is the one validated on real 1993 hardware/emulation. The TelidonP5 path predates it and remains for the in-browser TelidonP5 viewer.
 
 ---
 
 ## Features
 
-- **PNG → SVG → NAPLPS** — Upload a PNG/JPEG/GIF, vectorize it pixel-perfectly, then convert to a `.nap` file
-- **SVG → NAPLPS (direct)** — Upload any `.svg` directly and convert without going through a PNG
-- **NAPLPS Viewer** — In-browser viewer that renders `.nap` files using TelidonP5.js and p5.js
-- **Test file generators** — One-click download of test `.nap` files (rectangle, polygon, text, hybrid)
-- **Download** — Export as binary `.nap` or hex `.txt`
+- **PNG → SVG → NAPLPS** — Upload a PNG/JPEG/GIF, vectorize it (web-worker median-cut + RLE), then convert to `.nap`
+- **SVG → NAPLPS (direct)** — Upload any `.svg` and convert without going through a PNG
+- **Standard `.nap` export** — TURSHOW-readable real NAPLPS (interleaved coords + indexed palette)
+- **Text Placer** (`/text-placer`) — Drop crisp NAPLPS font text onto a traced graphic, drag to position over a true-field preview, and export a real `.nap`
+- **NAPLPS Viewer** (`/naplps-viewer`) — Renders real `.nap` files via a low-res raster (ported from TurShow's model), with the TelidonP5 dialect as a legacy toggle
+- **NAPLPS import** (`.nap → SVG`) — Decode a real `.nap` back into editable SVG
+- **Authoring tool** (`/author`) — Canvas-based shape editor with flood-fill pick, simplification, and SVG import
+- **Download** — Binary `.nap` or hex `.txt`
 
 ---
 
@@ -26,9 +42,9 @@ NAPLPS (ANSI X3.110-1983 / CSA T500-1983) is a binary graphics protocol develope
 
 Key encoding properties:
 - Opcode bytes `0x20–0x3F` (bit 6 = 0); data bytes `0x40–0x7F` (bit 6 = 1)
-- 12-bit coordinates per axis, packed as two 6-bit nibbles each offset by `0x40`
-- Color via `SET COLOR (0x3C)`: 4-byte GRBGRB interleaved bit-packing (2 bits/channel/byte)
-- Shapes drawn as polygons using `SET & POLY FILLED (0x37)`
+- 12-bit coordinates per axis; real NAPLPS **interleaves** X/Y bits per data byte
+- Color via an indexed palette: `SET COLOR (0x3C)` defines slots, `SELECT COLOR (0x3E)` picks one
+- Shapes drawn mostly as `SET & POLY FILLED (0x37)`, points/lines, and arcs
 
 ---
 
@@ -41,39 +57,64 @@ Key encoding properties:
 ### Installation
 
 ```bash
-git clone https://github.com/Hmmnd0/NextJSNAPLPSProject.git
-cd NextJSNAPLPSProject
+git clone https://github.com/Hmmnd0/NAPLPS-Converter.git
+cd NAPLPS-Converter
 npm install
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Build for production
+### Build / test
 
 ```bash
-npm run build
-npm start
+npm run build    # production build
+npm test         # Vitest suite (encode/decode round-trips, jsdom)
+npm run lint     # ESLint
 ```
 
 ---
 
 ## Usage
 
-### PNG → NAPLPS
-1. Drag and drop (or click to select) a PNG, JPEG, or GIF on the main page
-2. The image is vectorized into an SVG — download the SVG if you want it
-3. Click **Convert SVG to NAPLPS** to encode
-4. Download the `.nap` binary file
+### PNG / SVG → NAPLPS
+1. Upload a PNG/JPEG/GIF (or jump to the **SVG → NAPLPS** section and upload an `.svg`)
+2. Review/download the intermediate SVG
+3. **Convert SVG to NAPLPS** for the TelidonP5 dialect, or **Download standard .nap** for a real, TURSHOW-readable file
 
-### SVG → NAPLPS (direct)
-1. Scroll to the **SVG → NAPLPS (Direct Upload)** section
-2. Upload any `.svg` file — the SVG's `viewBox` or `width`/`height` is used for scaling
-3. Click **Convert to NAPLPS** and download the result
+### Text Placer (`/text-placer`)
+1. Upload the traced SVG graphic
+2. Add/position font-text blocks by dragging them over the live field preview; edit text, X/Y, char size, and color
+3. **Download .nap** — the graphic plus crisp NAPLPS font text
 
-### NAPLPS Viewer
-- Click **Open NAPLPS Viewer** (top right) or navigate to `/naplps-viewer`
-- Upload any `.nap` file to render it in the browser
+### NAPLPS Viewer (`/naplps-viewer`)
+- Upload any real `.nap` to render it (Standard raster mode), or switch to the TelidonP5 dialect renderer
+
+### NAPLPS import (`.nap → SVG`)
+- On the main page, import a `.nap` to decode it back into SVG for editing
+
+---
+
+## Testing against period hardware (TurShow + DOSBox)
+
+The standard `.nap` output is validated against **TurShow v1.05**, a 1993 DOS NAPLPS viewer, running under [DOSBox-X](https://dosbox-x.com/).
+
+> ⚠️ **TurShow is third-party shareware (© 1993 Shawn Rhoads / Software @ Work, all rights reserved) and is _not_ redistributed in this repository.** Obtain your own copy; its license permits a single local copy for personal use only.
+
+With your own `TURSHOW.EXE` placed in a local (git-ignored) folder, the test loop is:
+
+```bash
+# copy the file to a space-free mount dir
+cp your_output.nap /tmp/turshow/OUTPUT.NAP
+
+# launch TurShow in DOSBox-X (VGA)
+pkill -f dosbox-x; sleep 1
+dosbox-x -fastlaunch \
+  -c "mount c /tmp/turshow" -c "c:" \
+  -c "TURSHOW OUTPUT.NAP -vga"
+```
+
+`.nap` files are git-ignored by default (`*.nap`), except the real period fixtures under `test-fixtures/nap/` used by the decoder tests.
 
 ---
 
@@ -82,55 +123,52 @@ npm start
 ```
 src/
 ├── app/
-│   ├── page.tsx                # Main converter page
-│   ├── naplps-viewer/
-│   │   └── page.tsx            # NAPLPS viewer page
+│   ├── page.tsx                # Main converter + .nap import
+│   ├── text-placer/page.tsx    # Font-text placement UI → real .nap
+│   ├── naplps-viewer/page.tsx  # Raster + TelidonP5 viewer
+│   ├── author/page.tsx         # Canvas shape editor
 │   └── layout.tsx
 ├── components/
-│   ├── FileUpload.tsx           # Drag-and-drop PNG upload
+│   ├── FileUpload.tsx          # Drag-and-drop upload
 │   └── SvgAccuracyTest.tsx
 └── lib/
-    ├── naplps-foxtoolbox.ts    # Main encoder (SVG → NAPLPS)
-    ├── naplps-spec.ts          # Test file generators
-    ├── naplps.ts               # Legacy encoder + utilities
-    ├── svgToNaplps.ts          # SVG parsing and conversion pipeline
-    └── pixelToSvg.ts           # PNG → SVG vectorizer
+    ├── svgToNaplps.ts          # SVG parsing pipeline + svgToNaplpsFoxtoolbox / svgToNaplpsStandard
+    ├── naplps-std-encoder.ts   # Standard (real) NAPLPS encoder — interleaved coords, indexed palette, font text
+    ├── naplps-std-decoder.ts   # Standard (real) NAPLPS decoder
+    ├── naplpsRaster.ts         # Low-res framebuffer renderer (TurShow-style)
+    ├── naplpsToSvg.ts          # Real .nap → SVG (auto-fit viewBox)
+    ├── naplps-foxtoolbox.ts    # TelidonP5-dialect encoder
+    ├── naplps-decoder.ts       # TelidonP5-dialect decoder (round-trip tests)
+    ├── naplps.ts               # Shared NAPLPSPoint / NAPLPSColor types
+    └── pixelToSvg.ts(.worker)  # PNG → SVG vectorizer (web worker)
 
-public/telidon/
-    ├── naplps.js               # NAPLPS binary decoder (NapDecoder)
-    └── TelidonP5.js            # p5.js renderer (TelidonDraw)
-
-docs/
-    ├── NAP.txt                 # NAPLPS spec (Michael Dillon, 1993)
-    ├── Displaying-NAPLPS-graphics-rev1.pdf
-    └── NAPLPS Standard_compressed_compressed.pdf
+public/telidon/                 # p5.min.js, naplps.js, TelidonP5.js (legacy dialect viewer)
+docs/                           # NAP.txt spec + naplps-format-findings.md + reference PDFs
+test-fixtures/nap/              # Real period .nap files (decoder test fixtures)
 ```
 
 ---
 
 ## Technical Notes
 
-### Encoding (naplps-foxtoolbox.ts)
-- **Header**: `CANCEL ESC E NSR SO RESET DOMAIN` — sets 4-byte coordinate mode (`0x4D`)
-- **Color**: `SET COLOR (0x3C)` + 4 data bytes in GRBGRB format
-- **Shapes**: Each rectangle encoded as `SET & POLY FILLED (0x37)` with 4 corner points
-- **Coordinates**: 12-bit per axis → `[0x40 + hi6, 0x40 + lo6]`
+### Standard encoder (`naplps-std-encoder.ts`)
+- Period header (preamble + SO + RESET + DOMAIN `mvl=3` + TEXTURE) copied from real files
+- ≤16-slot indexed palette via `SELECT COLOR` + `SET COLOR` (black → slot 0)
+- `SET & POLY FILLED` (first vertex absolute, rest relative); `POINT ABS` / `LINE REL` for degenerate cases
+- Coordinates quantized to the LSB with delta chaining → no accumulated drift (round-trip is bit-exact on most fixtures)
+- Optional **font text** blocks via `TEXT` / `FIELD` / SI character runs
 
-### Decoding (naplps.js + TelidonP5.js)
-- `parseCommands` splits the byte stream at opcode boundaries
-- `setColor` accumulates 2 bits/channel/byte across 4 bytes → 8-bit RGB
-- `SET & POLY FILLED` uses a dedicated 12-bit coord path (`decodeCoord`)
-- Coordinates are normalized to canvas space as `rawValue / 4095`
+### Raster renderer (`naplpsRaster.ts`)
+- Low-res framebuffer + scanline even-odd fill + Bresenham boundary pixels + a seam-seal pass
+- Optional `fieldHeight` mode projects the absolute NAPLPS field (X 0–1, Y 0–fieldHeight) for overlaying field-space content (used by the Text Placer)
 
 ---
 
 ## Technologies
 
-- **Next.js 15** with App Router
-- **TypeScript**
-- **Tailwind CSS**
-- **p5.js** — canvas rendering in the viewer
-- **TelidonP5.js** — NAPLPS decoder and renderer
+- **Next.js** (App Router) + **TypeScript** + **Tailwind CSS**
+- **p5.js** / **TelidonP5.js** — the legacy in-browser dialect viewer
+- **Vitest** + jsdom — encode/decode round-trip tests
 
 ---
 
@@ -138,4 +176,6 @@ docs/
 
 - ANSI X3.110-1983 / CSA T500-1983 — NAPLPS standard
 - [NAP.txt](docs/NAP.txt) — Practical NAPLPS reference (Michael Dillon, 1993)
+- [docs/naplps-format-findings.md](docs/naplps-format-findings.md) — real-format notes from decompiling period tools
 - [TelidonP5.js](https://github.com/groundh0g/TelidonP5.js) — Browser-based Telidon renderer
+- TurShow v1.05 — © 1993 Shawn Rhoads / Software @ Work (third-party shareware; not included)

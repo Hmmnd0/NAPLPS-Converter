@@ -5,7 +5,7 @@ import Link from 'next/link';
 import FileUpload from '@/components/FileUpload';
 import SvgAccuracyTest from '@/components/SvgAccuracyTest';
 import { pixelPngToSvg } from '@/lib/pixelToSvg';
-import { svgToNaplps, svgToNaplpsFoxtoolbox, svgToNaplpsStandard, getConversionStats } from '@/lib/svgToNaplps';
+import { svgToNaplpsFoxtoolbox, svgToNaplpsStandard, getConversionStats } from '@/lib/svgToNaplps';
 import { naplpsToSvg } from '@/lib/naplpsToSvg';
 
 // ─── Download helpers ─────────────────────────────────────────────────────────
@@ -61,7 +61,6 @@ export default function Home() {
   const [processingProgress, setProcessingProgress] = useState<number>(0);
   const [error, setError] = useState<string>('');
   const [isNaplpsProcessing, setIsNaplpsProcessing] = useState<boolean>(false);
-  const [useFoxtoolboxApproach, setUseFoxtoolboxApproach] = useState<boolean>(true);
 
   // SVG direct upload → NAP state
   const [svgUploadString, setSvgUploadString] = useState<string | null>(null);
@@ -152,9 +151,7 @@ export default function Home() {
           return;
         }
         try {
-          const naplps = useFoxtoolboxApproach
-            ? await svgToNaplpsFoxtoolbox(svgString, img.width, img.height)
-            : await svgToNaplps(svgString, img.width, img.height);
+          const naplps = await svgToNaplpsFoxtoolbox(svgString, img.width, img.height);
           setNaplpsData(naplps);
           const stats = getConversionStats(svgString);
           setConversionStats(stats);
@@ -380,20 +377,6 @@ export default function Home() {
                 </button>
               )}
               <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between p-2 bg-gray-100 rounded-lg">
-                  <span className="text-sm font-medium">NAPLPS Approach:</span>
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useFoxtoolboxApproach}
-                      onChange={(e) => setUseFoxtoolboxApproach(e.target.checked)}
-                      className="mr-2"
-                    />
-                    <span className="text-sm">
-                      {useFoxtoolboxApproach ? 'Foxtoolbox (Proper)' : 'ASCII-Safe (Legacy)'}
-                    </span>
-                  </label>
-                </div>
                 <button
                   className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   onClick={handleConvertToNaplps}

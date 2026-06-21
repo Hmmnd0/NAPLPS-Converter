@@ -1,4 +1,4 @@
-import { NAPLPSEncoder, NAPLPSPoint, NAPLPSColor } from './naplps';
+import { NAPLPSColor } from './naplps';
 import { NAPLPSFoxtoolboxEncoder } from './naplps-foxtoolbox';
 import { encodeNaplpsStandard, NapText } from './naplps-std-encoder';
 import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
@@ -476,26 +476,6 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
   return { rects, polygons: shapes };
 }
 
-// Telidon 16-color palette (exact values from Telidon specification)
-const TELIDON_PALETTE = [
-  { r: 0, g: 0, b: 0 },         // 0: Black
-  { r: 0, g: 0, b: 255 },       // 1: Blue
-  { r: 0, g: 255, b: 0 },       // 2: Green
-  { r: 0, g: 255, b: 255 },     // 3: Cyan
-  { r: 255, g: 0, b: 0 },       // 4: Red
-  { r: 255, g: 0, b: 255 },     // 5: Magenta
-  { r: 165, g: 42, b: 42 },     // 6: Brown
-  { r: 192, g: 192, b: 192 },   // 7: Light Gray
-  { r: 128, g: 128, b: 128 },   // 8: Dark Gray
-  { r: 0, g: 0, b: 255 },       // 9: Light Blue
-  { r: 0, g: 255, b: 0 },       // 10: Light Green
-  { r: 0, g: 255, b: 255 },     // 11: Light Cyan
-  { r: 255, g: 0, b: 0 },       // 12: Light Red
-  { r: 255, g: 0, b: 255 },     // 13: Light Magenta
-  { r: 255, g: 255, b: 0 },     // 14: Yellow
-  { r: 255, g: 255, b: 255 },   // 15: White
-];
-
 // Extract <rect> elements as pixel rectangles
 function parseSvgToPixels(doc: Document, cssMap: Map<string, string>): Rectangle[] {
   const rects = doc.querySelectorAll('rect');
@@ -532,50 +512,6 @@ export function parseColor(color: string): NAPLPSColor {
   }
   console.warn('Unrecognized color format:', color);
   return { r: 0, g: 0, b: 0 };
-}
-
-// Find closest color in Telidon palette using perceptual (Lab) distance
-function quantizeColor(color: NAPLPSColor): NAPLPSColor {
-  let bestIndex = 0;
-  let minDistance = Infinity;
-
-  for (let i = 0; i < TELIDON_PALETTE.length; i++) {
-    const paletteColor = TELIDON_PALETTE[i];
-    const distance = calculateColorDistance(color, paletteColor);
-    if (distance < minDistance) {
-      minDistance = distance;
-      bestIndex = i;
-    }
-  }
-
-  return TELIDON_PALETTE[bestIndex];
-}
-
-function calculateColorDistance(color1: NAPLPSColor, color2: NAPLPSColor): number {
-  const lab1 = rgbToLab(color1);
-  const lab2 = rgbToLab(color2);
-
-  const deltaL = lab1.L - lab2.L;
-  const deltaA = lab1.a - lab2.a;
-  const deltaB = lab1.b - lab2.b;
-
-  return Math.sqrt(deltaL * deltaL + deltaA * deltaA + deltaB * deltaB);
-}
-
-function rgbToLab(rgb: NAPLPSColor): { L: number, a: number, b: number } {
-  const r = rgb.r / 255;
-  const g = rgb.g / 255;
-  const b = rgb.b / 255;
-
-  const x = 0.4124 * r + 0.3576 * g + 0.1805 * b;
-  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  const z = 0.0193 * r + 0.1192 * g + 0.9505 * b;
-
-  const L = 116 * Math.pow(y, 1/3) - 16;
-  const a = 500 * (Math.pow(x, 1/3) - Math.pow(y, 1/3));
-  const b_val = 200 * (Math.pow(y, 1/3) - Math.pow(z, 1/3));
-
-  return { L, a, b: b_val };
 }
 
 // Single vertical+horizontal merge pass
@@ -638,62 +574,6 @@ export function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
     cur = mergeOnce(cur);
   }
   return cur;
-}
-
-// Scale coordinates to 0–63 NAPLPS grid
-function scaleCoordinates(rectangles: Rectangle[], maxWidth: number, maxHeight: number): Rectangle[] {
-  const scaleFactorX = 63 / maxWidth;
-  const scaleFactorY = 63 / maxHeight;
-
-  return rectangles.map(rect => {
-    const scaledRect = {
-      ...rect,
-      x: Math.round(rect.x * scaleFactorX),
-      y: Math.round(rect.y * scaleFactorY),
-      width: Math.max(1, Math.round(rect.width * scaleFactorX)),
-      height: Math.max(1, Math.round(rect.height * scaleFactorY))
-    };
-
-    scaledRect.x = Math.max(0, Math.min(63, scaledRect.x));
-    scaledRect.y = Math.max(0, Math.min(63, scaledRect.y));
-    scaledRect.width = Math.max(1, Math.min(63 - scaledRect.x, scaledRect.width));
-    scaledRect.height = Math.max(1, Math.min(63 - scaledRect.y, scaledRect.height));
-
-    return scaledRect;
-  });
-}
-
-export async function svgToNaplps(svgString: string, width: number, height: number): Promise<string> {
-  try {
-    const { doc, cssMap } = parseSvgDocument(svgString);
-    let rectangles = parseSvgToPixels(doc, cssMap);
-    if (rectangles.length === 0) {
-      throw new Error('SVG contains no <rect> elements — output would be empty.');
-    }
-    rectangles = optimizeRectangles(rectangles);
-    rectangles = scaleCoordinates(rectangles, width, height);
-
-    const encoder = new NAPLPSEncoder(64, 64);
-
-    for (const rect of rectangles) {
-      const originalColor = parseColor(rect.color);
-      const quantizedColor = quantizeColor(originalColor);
-
-      const topLeft: NAPLPSPoint = { x: rect.x, y: rect.y };
-      const bottomRight: NAPLPSPoint = {
-        x: rect.x + rect.width - 1,
-        y: rect.y + rect.height - 1
-      };
-
-      encoder.setColor(quantizedColor);
-      encoder.addRectangle(topLeft, bottomRight);
-    }
-
-    return encoder.getHexString();
-  } catch (error) {
-    console.error('Error in svgToNaplps:', error);
-    throw error;
-  }
 }
 
 export async function svgToNaplpsFoxtoolbox(svgString: string, width: number, height: number): Promise<string> {
