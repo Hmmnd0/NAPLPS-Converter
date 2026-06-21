@@ -276,7 +276,13 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
         {/* Viewer Button */}
-        <div className="flex justify-end mb-4">
+        <div className="flex justify-end gap-3 mb-4">
+          <a
+            href="/text-placer"
+            className="px-6 py-2 bg-amber-600 text-white rounded-lg font-semibold shadow hover:bg-amber-700 transition-colors"
+          >
+            Text Placer
+          </a>
           <a
             href="/naplps-viewer"
             className="px-6 py-2 bg-purple-700 text-white rounded-lg font-semibold shadow hover:bg-purple-800 transition-colors"

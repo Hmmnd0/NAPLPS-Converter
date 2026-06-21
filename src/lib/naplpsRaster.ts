@@ -17,6 +17,14 @@ export interface RasterOptions {
   height?: number;
   /** background colour (period art is on black); null leaves it transparent. */
   background?: NapColor | null;
+  /**
+   * When set, project the absolute NAPLPS field X∈[0,1], Y∈[0,fieldHeight] onto
+   * the framebuffer instead of fitting the content bounding box. This keeps the
+   * art at its true field coordinates (with letterbox margins shown) so a caller
+   * can overlay other field-space content — e.g. font text being placed — in
+   * exact registration. Width follows the 1/fieldHeight aspect (4:3 at 0.75).
+   */
+  fieldHeight?: number;
 }
 
 export interface RasterResult {
@@ -30,6 +38,16 @@ export interface RasterResult {
 
 // Map the content bounding box into the framebuffer, preserving aspect ratio and
 // flipping Y (NAPLPS axes point up). Returns a point→pixel projection.
+// Project the absolute NAPLPS field (X∈[0,1], Y∈[0,fieldHeight]) onto the
+// framebuffer, flipping Y. Unlike makeProjection this does not crop to content,
+// so field coordinates land at fixed pixels regardless of what is drawn.
+function makeFieldProjection(W: number, H: number, fieldHeight: number) {
+  return (p: NapPoint) => ({
+    x: p.x * (W - 1),
+    y: (1 - p.y / fieldHeight) * (H - 1),
+  });
+}
+
 function makeProjection(shapes: NapShape[], W: number, H: number) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of shapes) for (const p of s.points) {
@@ -58,7 +76,9 @@ export function rasterizeNaplps(bytes: Uint8Array | number[], opts: RasterOption
     if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
     if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
   }
-  const aspect = isFinite(minX) ? ((maxX - minX) || 1) / ((maxY - minY) || 1) : 4 / 3;
+  const aspect = opts.fieldHeight
+    ? 1 / opts.fieldHeight
+    : isFinite(minX) ? ((maxX - minX) || 1) / ((maxY - minY) || 1) : 4 / 3;
   const W = Math.max(32, Math.round(H * aspect));
 
   const pixels = new Uint8ClampedArray(W * H * 4);
@@ -66,7 +86,9 @@ export function rasterizeNaplps(bytes: Uint8Array | number[], opts: RasterOption
   // fills) vs. left as background. Needed so the seam-seal pass below can tell a
   // real gap from the art's own black, which equals the black background colour.
   const painted = new Uint8Array(W * H);
-  const project = makeProjection(shapes, W, H);
+  const project = opts.fieldHeight
+    ? makeFieldProjection(W, H, opts.fieldHeight)
+    : makeProjection(shapes, W, H);
 
   const put = (x: number, y: number, c: NapColor) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
