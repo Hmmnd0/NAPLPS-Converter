@@ -94,22 +94,19 @@ npm run lint     # ESLint
 
 ## Testing against period hardware (TurShow + DOSBox)
 
-The standard `.nap` output is validated against **TurShow v1.05**, a 1993 DOS NAPLPS viewer, running under [DOSBox-X](https://dosbox-x.com/).
-
-> ⚠️ **TurShow is third-party shareware (© 1993 Shawn Rhoads / Software @ Work, all rights reserved) and is _not_ redistributed in this repository.** Obtain your own copy; its license permits a single local copy for personal use only.
-
-With your own `TURSHOW.EXE` placed in a local (git-ignored) folder, the test loop is:
+The standard `.nap` output is validated against **TurShow**, a 1993 DOS NAPLPS viewer, running under [DOSBox-X](https://dosbox-x.com/). A ready-made launcher lives in [`tools/turshow/`](tools/turshow/) — `TURSHOW.EXE` is bundled there for convenience. Install DOSBox-X (`brew install dosbox-x`, `apt install dosbox-x`, or `winget install dosbox-x`), then:
 
 ```bash
-# copy the file to a space-free mount dir
-cp your_output.nap /tmp/turshow/OUTPUT.NAP
+# macOS / Linux
+./tools/turshow/view.sh your_output.nap
 
-# launch TurShow in DOSBox-X (VGA)
-pkill -f dosbox-x; sleep 1
-dosbox-x -fastlaunch \
-  -c "mount c /tmp/turshow" -c "c:" \
-  -c "TURSHOW OUTPUT.NAP -vga"
+# Windows
+tools\turshow\view.bat your_output.nap
 ```
+
+The script stages the file under a DOS 8.3 name in a space-free temp mount and launches TurShow in VGA mode. See [`tools/turshow/README.md`](tools/turshow/README.md) for details.
+
+> **TurShow** is © 1993 Shawn Rhoads / Software @ Work, included here for archival and interoperability testing. The **DOSBox-X** emulator is not bundled — install it as above.
 
 `.nap` files are git-ignored by default (`*.nap`), except the real period fixtures under `test-fixtures/nap/` used by the decoder tests.
 
