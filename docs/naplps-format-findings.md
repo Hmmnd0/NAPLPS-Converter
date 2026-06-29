@@ -1,7 +1,6 @@
 # Real NAPLPS Format — Findings from Decompiled Period Tools
 
-Reverse-engineered from period DOS tools (Ghidra-decompiled to
-`/Users/joe/NAPLPS Source files/decompiled/`), the JP RHINO decoder source
+Reverse-engineered from period DOS tools (Ghidra-decompiled), the JP RHINO decoder source
 (`JP NAPLPS Source Files/rhsrv43a/PDISET.C`, clean C), and **real `.nap` files**
 shipped with those tools (`MGE201A/*.NAP`, `NAPICO11/*.NAP`, `NAPWMF08/*.NAP`).
 
@@ -32,25 +31,27 @@ Counts of PDI opcodes actually used (graphics mode, SO/SI tracked):
 
 | opcode | command | uses | we emit it? |
 |---|---|---:|---|
-| 0x3E | SELECT-COLOR | 231 | ❌ |
-| 0x24 | PT-SET-ABS (move-to) | 214 | ❌ |
-| 0x29 | LINE-REL | 192 | ❌ |
+| 0x3E | SELECT-COLOR | 231 | ✅ |
+| 0x24 | PT-SET-ABS (move-to) | 214 | ✅ |
+| 0x29 | LINE-REL | 192 | ✅ |
 | 0x37 | SET&POLY-FILLED | 164 | ✅ |
-| 0x26 | POINT-ABS | 55 | ❌ |
+| 0x26 | POINT-ABS | 55 | ✅ |
 | 0x21 | DOMAIN | 36 | ✅ (header) |
-| 0x38 | FIELD | 34 | ❌ |
+| 0x38 | FIELD | 34 | ✅ (text blocks) |
 | 0x3C | SET-COLOR | 32 | ✅ |
-| 0x3D | WAIT | 29 | ❌ |
-| 0x23 | TEXTURE | 20 | ❌ |
-| 0x22 | TEXT | 14 | ❌ |
-| 0x2B/0x25 | SET&LINE-REL / PT-SET-REL | 10/10 | ❌ |
-| 0x2E/0x2F | ARC / ARC-FILLED | 6/7 | ❌ |
-| 0x39 | INCR-POINT | 5 | ❌ |
-| 0x31 | **RECT-FILLED** | **1** | ✅ (our *primary* primitive) |
+| 0x3D | WAIT | 29 | ❌ (static images; not needed) |
+| 0x23 | TEXTURE | 20 | ✅ (header) |
+| 0x22 | TEXT | 14 | ✅ (text blocks) |
+| 0x2B/0x25 | SET&LINE-REL / PT-SET-REL | 10/10 | ❌ (use ABS variants instead) |
+| 0x2E/0x2F | ARC / ARC-FILLED | 6/7 | ❌ (no arc output in converter) |
+| 0x39 | INCR-POINT | 5 | ❌ (not needed for conversion) |
+| 0x31 | **RECT-FILLED** | **1** | ❌ (use POLY-FILLED instead) |
 
 **Takeaways:** real content is drawn with **move-to + relative lines** and
-**polygons**, over an **indexed palette**. Filled rectangles — our main output —
-appear once across all files. Arcs, text, incrementals and fields are all in use.
+**polygons**, over an **indexed palette**. The unimplemented opcodes (WAIT,
+REL variants, ARC, INCR-POINT) are not required for static image conversion —
+WAIT is animation-only, the REL variants are alternatives to the ABS forms we
+already emit, and ARC/INCR-POINT are drawing tools unused in our pipeline.
 
 ## Coordinate decode (the standard, from RHINO `getnum`)
 
@@ -114,8 +115,7 @@ The recommendations below were built:
 
 1. **Standard decoder** (`naplps-std-decoder.ts`) — reads real `.nap` →
    shapes via `getnum` interleaving + DOMAIN state + the indexed-palette model;
-   tested against real sample files. `naplps-decoder.ts` is kept only for
-   foxtoolbox-dialect round-trip tests.
+   tested against real sample files.
 2. **Standard encoder** (`naplps-std-encoder.ts`) — exact inverse: indexed
    palette (`SELECT-COLOR`/`SET-COLOR`), `SET&POLY-FILLED` with abs + relative
    deltas, plus `TEXT`/`FIELD` font text. Round-trip is bit-exact on most
