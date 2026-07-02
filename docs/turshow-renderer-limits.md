@@ -87,6 +87,28 @@ and thins out. This is display rounding, not data loss. The converters snap
 1 source px to an integer number of coordinate steps so abutting shapes can
 never round apart (background seams).
 
+## 7. The DOMAIN logical pel is a pen size — and period files ship a fat one
+
+The DOMAIN command carries a "logical pel" coordinate: the drawing pen size.
+The period sample our header was copied from sets pel 32/8192 (~2.5 VGA px),
+which inflates every line AND every polygon outline. Small nonzero pels are
+worse: they route line drawing through the textured-line path and draw broken
+strokes (see RHINO PDISET.C `linea()`: `tlstl == 0 || (pelx==0 && pely==0)`
+guards the solid-line call). **Pel (0,0) = plain single-pixel solid lines**;
+our encoder now emits that.
+
+## 8. The line rasterizer drops the last pixel of each segment
+
+Long straight lines look perfect (the missing endpoint is invisible), but a
+curve built from 2-3px segments loses a pixel at every joint and renders
+dashed/hollow — at any pel, chained or as separate commands. Consequences:
+
+- LINE primitives are only safe for **long straight strokes** (hatching,
+  rules). The converter uses 2-point lines for thin axis-aligned strips only.
+- **Outlines and curved thin strokes must be filled polygons.** Scanline fill
+  is always solid, and with pel 0 the fill's outline no longer inflates, so a
+  1-2px filled stroke renders at true width.
+
 ## Route comparison (MadMaze end screen, 636×331)
 
 | Route | Shapes | Size | TURSHOW time | Fidelity |

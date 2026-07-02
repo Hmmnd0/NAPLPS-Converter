@@ -27,7 +27,13 @@ const HEADER = [
   0x18, 0x1b, 0x22, 0x46, 0x1b, 0x45, 0x1f, 0x40, 0x40,
   0x0e,                                // SO → graphics mode
   0x20, 0x7f, 0x4f,                    // RESET
-  0x21, 0x4d, 0x40, 0x40, 0x49, 0x40,  // DOMAIN: mvl=3, svl=1
+  // DOMAIN: mvl=3, svl=1, then the logical pel (pen) size as a coordinate.
+  // The period sample we originally copied carried pel 32/8192 (~2.5 VGA px):
+  // every line and outline drew with a fat pen. Small nonzero pels draw
+  // BROKEN lines (nonzero pel routes through the textured-line path — see
+  // RHINO PDISET.C linea(): `tlstl == 0 || (pelx==0 && pely==0)` guards
+  // sline). Pel (0,0) forces plain solid single-pixel lines unconditionally.
+  0x21, 0x4d, 0x40, 0x40, 0x40, 0x40,
   0x23, 0x40, 0x40, 0x52, 0x40, 0x40,  // TEXTURE
 ];
 
@@ -37,6 +43,7 @@ const OP = {
   SET_POLY_FILLED: 0x37,
   PT_SET_ABS: 0x24,
   LINE_REL: 0x29,
+  SET_LINE_ABS: 0x2a,
   POINT_ABS: 0x26,
   TEXT: 0x22,
   FIELD: 0x38,
@@ -226,11 +233,15 @@ export function encodeNaplpsStandard(shapes: NapShape[], opts: EncodeOptions = {
       out.push(OP.POINT_ABS);
       emitAbs(out, s.points[0]);
     } else {
-      // polyline, or a polygon too small to fill: move to first, then LINE-REL.
-      out.push(OP.PT_SET_ABS);
-      const start = emitAbs(out, s.points[0]);
-      out.push(OP.LINE_REL);
-      emitRelPath(out, s.points, start);
+      // polyline, or a polygon too small to fill. Emitted as independent
+      // 2-point SET&LINE segments: TURSHOW renders multi-coordinate LINE
+      // chains with gaps (empirical — 2-point lines are always solid, dense
+      // chains dash regardless of pel/texture), so chains are never used.
+      for (let i = 0; i + 1 < s.points.length; i++) {
+        out.push(OP.SET_LINE_ABS);
+        emitAbs(out, s.points[i]);
+        emitAbs(out, s.points[i + 1]);
+      }
     }
   }
 
