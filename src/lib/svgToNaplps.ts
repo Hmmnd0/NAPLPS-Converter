@@ -741,31 +741,14 @@ export async function svgToNaplpsStandard(
 
   const shapes: NapShape[] = [];
 
-  // Thin axis-aligned shapes become NAPLPS LINE primitives, not filled
-  // polygons: TURSHOW draws a polygon as fill + boundary pixels, so a 1px
-  // filled strip renders 2-3px wide and swallows the gap beside it (hatching
-  // turns into a smear). A line draws exactly 1px — the period-correct way to
-  // author fine strokes.
-  const THIN = 2.01, LONG = 4; // source px
-  const thinLine = (x0: number, y0: number, x1: number, y1: number, color: NapColor): NapShape | null => {
-    const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
-    if (w <= THIN && h >= LONG) {
-      const cx = (x0 + x1) / 2;
-      return { type: 'polyline', filled: false, color, points: [norm({ x: cx, y: Math.min(y0, y1) }), norm({ x: cx, y: Math.max(y0, y1) })] };
-    }
-    if (h <= THIN && w >= LONG) {
-      const cy = (y0 + y1) / 2;
-      return { type: 'polyline', filled: false, color, points: [norm({ x: Math.min(x0, x1), y: cy }), norm({ x: Math.max(x0, x1), y: cy })] };
-    }
-    return null;
-  };
-
+  // NOTE: with the pel-0 (single-pixel pen) header, plain filled shapes render
+  // at true width in TURSHOW — thin strips need no LINE-primitive conversion.
+  // (An earlier line-based approach left half-pixel gaps: a 2px strip drawn as
+  // a 1px centreline let the background bleed through beside it.)
   for (const r of rects) {
     if (r.width * r.height < minArea) continue;
     const color = toColor(r.color);
     if (isExcluded(color)) continue;
-    const line = thinLine(r.x, r.y, r.x + r.width, r.y + r.height, color);
-    if (line) { shapes.push(line); continue; }
     shapes.push({
       type: 'polygon',
       filled: true,
@@ -798,21 +781,7 @@ export async function svgToNaplpsStandard(
 
   for (const g of groups.values()) {
     if (g.rings.length === 1) {
-      // thin strip → line primitive (see thinLine above); bbox in source px
-      // is recovered from field units via the snapped scale s.
-      const ring = g.rings[0];
-      let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
-      for (const p of ring) { if (p.x < mnx) mnx = p.x; if (p.x > mxx) mxx = p.x; if (p.y < mny) mny = p.y; if (p.y > mxy) mxy = p.y; }
-      const wPx = (mxx - mnx) / s, hPx = (mxy - mny) / s;
-      if ((wPx <= THIN && hPx >= LONG) || (hPx <= THIN && wPx >= LONG)) {
-        const cx = (mnx + mxx) / 2, cy = (mny + mxy) / 2;
-        const points = wPx <= THIN
-          ? [{ x: cx, y: mny }, { x: cx, y: mxy }]
-          : [{ x: mnx, y: cy }, { x: mxx, y: cy }];
-        shapes.push({ type: 'polyline', filled: false, color: g.color, points });
-        continue;
-      }
-      shapes.push({ type: 'polygon', filled: true, color: g.color, points: ring });
+      shapes.push({ type: 'polygon', filled: true, color: g.color, points: g.rings[0] });
     } else {
       // Compound (even-odd holes): rasterize the rings together and re-trace
       // into hole-free filled pieces. Fills are scanline-drawn in TURSHOW —
