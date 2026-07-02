@@ -22,7 +22,11 @@ export default function NaplpsViewer() {
     if (!host) return;
     setError("");
     try {
-      const { width, height, pixels, shapeCount, commandCounts } = rasterizeNaplps(bytes, { height: resolution });
+      // Always render at ≥512px so thin shapes (sub-pixel at low res) survive.
+      // The user's resolution slider controls the CSS display size; quality is
+      // decoupled so the image looks correct at any display size.
+      const renderH = Math.max(resolution, 512);
+      const { width, height, pixels, shapeCount, commandCounts } = rasterizeNaplps(bytes, { height: renderH });
       setStats(commandCounts);
       if (shapeCount === 0) {
         host.innerHTML = '<span class="text-zinc-500">No drawable shapes (text-only frame?)</span>';
@@ -34,10 +38,11 @@ export default function NaplpsViewer() {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
-      canvas.style.maxWidth = "100%";
-      canvas.style.maxHeight = "100%";
+      // CSS display size: honour the slider but cap to the container height.
+      const displayH = Math.min(resolution, 400);
+      canvas.style.height = `${displayH}px`;
       canvas.style.width = "auto";
-      canvas.style.height = "auto";
+      canvas.style.maxWidth = "100%";
       canvas.style.imageRendering = pixelated ? "pixelated" : "auto";
       host.innerHTML = "";
       host.appendChild(canvas);
@@ -82,7 +87,7 @@ export default function NaplpsViewer() {
             <label className="flex items-center gap-2">
               <span className="field-label">Resolution</span>
               <input
-                type="range" min={96} max={512} step={16}
+                type="range" min={96} max={768} step={16}
                 value={resolution}
                 onChange={(e) => setResolution(Number(e.target.value))}
               />

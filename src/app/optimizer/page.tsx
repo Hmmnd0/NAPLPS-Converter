@@ -5,6 +5,7 @@ import AppHeader from "@/components/AppHeader";
 import { decodeNaplpsStandard, type NapShape, type NapColor, type NapPoint } from "@/lib/naplps-std-decoder";
 import { encodeNaplpsStandard } from "@/lib/naplps-std-encoder";
 import { rasterizeNaplps } from "@/lib/naplpsRaster";
+import { labelComponents, traceEdges, simplifyForHardware } from "@/lib/regionTrace";
 
 const key = (c: NapColor) => `${c.r},${c.g},${c.b}`;
 const hex = (c: NapColor) =>
@@ -18,6 +19,7 @@ const dim = (c: NapColor): NapColor => ({ r: Math.round(c.r * 0.22), g: Math.rou
 
 // Greedy palette merge: the most-used colours become representatives; any colour
 // within `threshold` RGB distance snaps to the nearest. Preserves order/count.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mergeColors(shapes: NapShape[], threshold: number): NapShape[] {
   if (threshold <= 0) return shapes;
   const counts = new Map<string, { color: NapColor; count: number }>();
@@ -58,6 +60,52 @@ function pointInPoly(pt: NapPoint, poly: NapPoint[]) {
   return inside;
 }
 
+// Rasterize selected shapes onto a virtual pixel grid, trace connected-region
+// boundaries, and return one merged polygon per connected region.
+const MERGE_W = 512, MERGE_H = 384; // 4:3, matches NAPLPS 1.0 × 0.75 field
+
+function mergeShapesIntoPolys(selectedShapes: NapShape[]): NapShape[] {
+  if (selectedShapes.length === 0) return [];
+  const color = selectedShapes[0].color;
+  const mask = new Uint8Array(MERGE_W * MERGE_H);
+
+  for (const s of selectedShapes) {
+    if (s.points.length < 3) continue;
+    const xs = s.points.map(p => p.x), ys = s.points.map(p => p.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const y0 = Math.min(...ys), y1 = Math.max(...ys);
+    // NAPLPS Y is up (0=bottom, 0.75=top); pixel Y is down (0=top).
+    const px0 = Math.max(0, Math.floor(x0 * MERGE_W));
+    const px1 = Math.min(MERGE_W, Math.ceil(x1 * MERGE_W));
+    const py0 = Math.max(0, Math.floor((0.75 - y1) / 0.75 * MERGE_H));
+    const py1 = Math.min(MERGE_H, Math.ceil((0.75 - y0) / 0.75 * MERGE_H));
+    for (let py = py0; py < py1; py++)
+      for (let px = px0; px < px1; px++)
+        mask[py * MERGE_W + px] = 1;
+  }
+
+  const { labels, comps } = labelComponents(mask, MERGE_W, MERGE_H);
+  const maxPts = Math.max(8000, 4 * (MERGE_W + MERGE_H));
+  const result: NapShape[] = [];
+
+  for (const comp of comps) {
+    const raw = traceEdges(labels, comp.label, comp.startX, comp.startY, MERGE_W, MERGE_H, maxPts);
+    // Simplify in pixel space (epsilon=1.5px), then convert to NAPLPS coords.
+    // Converting first and simplifying in 0–1 space would make epsilon 1.5× the
+    // entire field width, collapsing every polygon to 2 points.
+    const simplified = simplifyForHardware(raw, 1.5);
+    if (simplified.length < 3) continue;
+    result.push({
+      type: 'polygon', filled: true, color,
+      points: simplified.map(p => ({
+        x: p.x / MERGE_W,
+        y: 0.75 - (p.y / MERGE_H) * 0.75,
+      })),
+    });
+  }
+  return result;
+}
+
 const uniqueColorCount = (shapes: NapShape[]) => new Set(shapes.map((s) => key(s.color))).size;
 const encodedSize = (shapes: NapShape[]) => {
   if (shapes.length === 0) return 0;
@@ -70,7 +118,6 @@ export default function Optimizer() {
   const [original, setOriginal] = useState<NapShape[]>([]);
   const [shapes, setShapes] = useState<NapShape[]>([]);
   const [commandCounts, setCommandCounts] = useState<Record<string, number> | null>(null);
-  const [threshold, setThreshold] = useState(0);
   const [resolution, setResolution] = useState(256);
   const [pixelated, setPixelated] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -79,6 +126,7 @@ export default function Optimizer() {
   // than this are flagged as likely overdraw and can be bulk-selected.
   const [tinyPermille, setTinyPermille] = useState(0.5);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<NapShape[][]>([]);
 
   const tinyArea = tinyPermille / 1000;
 
@@ -86,7 +134,7 @@ export default function Optimizer() {
   // Projection used by the raster, kept so canvas clicks can be inverted to NAPLPS coords for hit-testing.
   const projRef = useRef<{ W: number; H: number; minX: number; minY: number; spanX: number; spanY: number } | null>(null);
 
-  const preview = useMemo(() => mergeColors(shapes, threshold), [shapes, threshold]);
+  const preview = useMemo(() => shapes, [shapes]);
 
   const origSize = useMemo(() => encodedSize(original), [original]);
   const newSize = useMemo(() => encodedSize(preview), [preview]);
@@ -166,7 +214,7 @@ export default function Optimizer() {
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(""); setFileName(file.name); setSelected(new Set()); setHover(null); setThreshold(0);
+    setError(""); setFileName(file.name); setSelected(new Set()); setHover(null);
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -182,14 +230,50 @@ export default function Optimizer() {
     reader.readAsArrayBuffer(file);
   };
 
-  const applyMerge = () => { setShapes(mergeColors(shapes, threshold)); setThreshold(0); };
-  const reset = () => { setShapes(original); setThreshold(0); setSelected(new Set()); setHover(null); };
+  const pushHistory = (current: NapShape[]) => setHistory(h => [...h.slice(-49), current]);
+  const undo = () => setHistory(h => {
+    if (h.length === 0) return h;
+    setShapes(h[h.length - 1]);
+    setSelected(new Set()); setHover(null);
+    return h.slice(0, -1);
+  });
+
+  const reset = () => { setShapes(original); setHistory([]); setSelected(new Set()); setHover(null); };
   const deleteSelected = () => {
+    pushHistory(shapes);
     setShapes((prev) => prev.filter((_, j) => !selected.has(j)));
+    setSelected(new Set()); setHover(null);
+  };
+  const selectByColor = (color: NapColor) => {
+    setSelected(new Set(preview.map((s, i) => key(s.color) === key(color) ? i : -1).filter(i => i >= 0)));
+  };
+  const mergeSelected = () => {
+    const selectedShapes = [...selected].map(i => shapes[i]).filter(s => s.type === 'polygon' && s.filled);
+    const merged = mergeShapesIntoPolys(selectedShapes);
+    if (merged.length === 0) return;
+    pushHistory(shapes);
+    const firstIdx = Math.min(...[...selected]);
+    setShapes(prev => {
+      const kept = prev.filter((_, i) => !selected.has(i));
+      return [...kept.slice(0, firstIdx), ...merged, ...kept.slice(firstIdx)];
+    });
+    setSelected(new Set());
+    setHover(null);
+  };
+
+  const reassignSelected = (targetColor: NapColor) => {
+    pushHistory(shapes);
+    setShapes((prev) => prev.map((s, i) => selected.has(i) ? { ...s, color: targetColor } : s));
+    setSelected(new Set()); setHover(null);
+  };
+  const sortByColor = () => {
+    pushHistory(shapes);
+    setShapes((prev) => [...prev].sort((a, b) => key(a.color).localeCompare(key(b.color))));
     setSelected(new Set()); setHover(null);
   };
   const selectTiny = () => setSelected(new Set(preview.map((s, i) => (shapeArea(s) < tinyArea ? i : -1)).filter((i) => i >= 0)));
   const move = (i: number, dir: -1 | 1) => {
+    pushHistory(shapes);
     setShapes((prev) => {
       const a = [...prev]; const j = i + dir;
       if (j < 0 || j >= a.length) return prev;
@@ -241,7 +325,7 @@ export default function Optimizer() {
           {fileName && <span className="text-sm text-zinc-500">{fileName}</span>}
           {loaded && (
             <>
-              <button onClick={applyMerge} disabled={threshold <= 0} className="btn-ghost">Apply color merge</button>
+              <button onClick={undo} disabled={history.length === 0} className="btn-ghost">Undo</button>
               <button onClick={reset} className="btn-ghost">Reset</button>
               <button onClick={download} className="btn-accent">Download optimized .nap</button>
             </>
@@ -249,29 +333,32 @@ export default function Optimizer() {
         </div>
 
         {loaded && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 items-start">
             {/* Preview + stats */}
             <div className="space-y-4">
               <div className="card p-4">
-                <div className="rounded-xl bg-black flex items-center justify-center overflow-hidden min-h-[280px]">
+                <div
+                  className="rounded-xl bg-black overflow-auto"
+                  style={{ height: 560, width: '100%' }}
+                >
                   <canvas
                     ref={canvasRef}
                     onClick={handleCanvasClick}
                     className="cursor-crosshair"
-                    style={{ maxWidth: "100%", maxHeight: 440, imageRendering: pixelated ? "pixelated" : "auto" }}
+                    style={{ imageRendering: pixelated ? "pixelated" : "auto", display: 'block' }}
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-5 mt-4 text-sm text-zinc-600">
                   <label className="flex items-center gap-2">
-                    <span className="field-label">Resolution</span>
-                    <input type="range" min={96} max={512} step={16} value={resolution} onChange={(e) => setResolution(+e.target.value)} />
-                    <span className="font-mono w-10 text-zinc-500">{resolution}px</span>
+                    <span className="field-label">Zoom</span>
+                    <input type="range" min={256} max={2048} step={128} value={resolution} onChange={(e) => setResolution(+e.target.value)} />
+                    <span className="font-mono w-16 text-zinc-500">{resolution}px</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={pixelated} onChange={(e) => setPixelated(e.target.checked)} />
                     <span className="field-label">Pixelated</span>
                   </label>
-                  <span className="text-xs text-zinc-400">Tip: click the art to pick a shape</span>
+                  <span className="text-xs text-zinc-400">Scroll to pan · click to select</span>
                 </div>
               </div>
 
@@ -292,30 +379,53 @@ export default function Optimizer() {
 
             {/* Palette + shapes */}
             <div className="space-y-4">
-              <div className="card p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-sm text-zinc-800">Palette ({palette.length})</h3>
-                  <label className="flex items-center gap-2 text-xs text-zinc-500">
-                    Merge ≤
-                    <input type="range" min={0} max={150} step={2} value={threshold} onChange={(e) => setThreshold(+e.target.value)} />
-                    <span className="font-mono w-6">{threshold}</span>
-                  </label>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="card p-4 space-y-3">
+                <h3 className="font-semibold text-sm text-zinc-800">
+                  Palette ({palette.length}) — click a color to select all shapes of that color
+                </h3>
+                <div className="flex flex-wrap gap-2">
                   {palette.map((p) => (
-                    <span key={key(p.color)} title={`${hex(p.color)} · ${p.count} shapes`}
-                      className="inline-flex items-center gap-1 rounded-md border border-zinc-200 pl-1 pr-1.5 py-0.5 text-xs text-zinc-600">
-                      <span className="w-3.5 h-3.5 rounded-sm border border-zinc-300" style={{ background: hex(p.color) }} />
-                      {p.count}
+                    <span
+                      key={key(p.color)}
+                      onClick={() => selectByColor(p.color)}
+                      title={`${hex(p.color)} · ${p.count} shapes`}
+                      className="cursor-pointer inline-flex items-center gap-1.5 rounded-md border border-zinc-200 hover:border-indigo-400 hover:bg-indigo-50 pl-1 pr-2 py-1 text-xs text-zinc-600 transition-colors"
+                    >
+                      <span className="w-4 h-4 rounded-sm border border-zinc-300" style={{ background: hex(p.color) }} />
+                      <span className="font-mono">{hex(p.color)}</span>
+                      <span className="text-zinc-400">{p.count}</span>
                     </span>
                   ))}
                 </div>
+
+                {selected.size > 0 && (
+                  <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-3 space-y-2">
+                    <p className="text-sm font-medium text-indigo-800">
+                      {selected.size} shape{selected.size !== 1 ? 's' : ''} selected — change color to:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {palette.map((p) => (
+                        <span
+                          key={key(p.color)}
+                          onClick={() => reassignSelected(p.color)}
+                          className="cursor-pointer inline-flex items-center gap-1.5 rounded-md border-2 border-white hover:border-indigo-500 bg-white pl-1 pr-2 py-1 text-xs text-zinc-600 transition-colors"
+                        >
+                          <span className="w-4 h-4 rounded-sm border border-zinc-300" style={{ background: hex(p.color) }} />
+                          <span className="font-mono">{hex(p.color)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold text-sm text-zinc-800">Shapes ({preview.length})</h3>
-                  {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="text-xs text-zinc-400 hover:text-zinc-700">Clear selection</button>}
+                  <div className="flex items-center gap-3">
+                    <button onClick={sortByColor} className="text-xs text-indigo-600 hover:text-indigo-500">Sort by color</button>
+                    {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="text-xs text-zinc-400 hover:text-zinc-700">Clear selection</button>}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 mb-2 text-xs text-zinc-500">
                   <button onClick={selectTiny} disabled={tinyCount === 0} className="text-indigo-600 hover:text-indigo-500 disabled:opacity-30 whitespace-nowrap">
@@ -327,9 +437,14 @@ export default function Optimizer() {
                 </div>
 
                 {selected.size > 0 && (
-                  <button onClick={deleteSelected} className="btn-ghost w-full mb-2 text-red-600 border-red-200 hover:bg-red-50">
-                    Delete selected ({selected.size})
-                  </button>
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={mergeSelected} className="btn-ghost flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+                      Merge {selected.size} into one poly
+                    </button>
+                    <button onClick={deleteSelected} className="btn-ghost flex-1 text-red-600 border-red-200 hover:bg-red-50">
+                      Delete selected ({selected.size})
+                    </button>
+                  </div>
                 )}
 
                 <div className="space-y-0.5 max-h-[460px] overflow-y-auto">

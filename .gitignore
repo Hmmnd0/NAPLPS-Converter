@@ -46,3 +46,7 @@ next-env.d.ts
 naplps_output.*
 # but DO track the real period .nap files used as decoder test fixtures
 !test-fixtures/nap/*.nap
+
+# nap-editor build artifacts
+nap-editor/node_modules/
+nap-editor/out/

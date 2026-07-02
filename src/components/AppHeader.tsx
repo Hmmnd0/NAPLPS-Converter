@@ -8,6 +8,7 @@ const NAV = [
   { href: "/text-placer", label: "Text Placer" },
   { href: "/naplps-viewer", label: "Viewer" },
   { href: "/optimizer", label: "Optimizer" },
+  { href: "/vectorizer", label: "Vectorizer" },
 ];
 
 // Shared top navigation. `tone="dark"` is used by the Author canvas editor so the
