@@ -20,6 +20,7 @@ const LSB = 1 << (11 - 3 * MVL); // smallest encodable fixed-point step (=4)
 // negative (x -= 2*ONE), so exactly ±ONE is ambiguous; stay one LSB inside it.
 const SAFE = ONE - LSB;
 
+
 // Header mimicking genuine period files: service preamble, SO (graphics), RESET,
 // DOMAIN (mvl=3, svl=1), TEXTURE. Copied byte-for-byte from real .nap samples.
 const HEADER = [
@@ -129,9 +130,10 @@ const DEFAULT_TEXT_COLOR: NapColor = { r: 255, g: 255, b: 255 };
 function emitText(out: number[], t: NapText, slotOf: (c: NapColor) => number) {
   const cw = t.charW ?? 0.018, ch = t.charH ?? 0.030;
   out.push(OP.SELECT_COLOR); emitIndex(out, slotOf(t.color ?? DEFAULT_TEXT_COLOR));
-  // TEXT: 2 attribute bytes (proportional spacing, L→R, no rotation — copied
-  // from real files) followed by the character field size as a coordinate.
-  out.push(OP.TEXT, 0x70, 0x40);
+  // TEXT: 2 attribute bytes + character field size. Real period files (e.g.
+  // memra3.nap) use 0x40 0x40 (no special flags). 0x70 was wrong — it set
+  // bits that TURSHOW doesn't handle, silencing text rendering.
+  out.push(OP.TEXT, 0x40, 0x40);
   emitCoord(out, Math.round(cw * ONE), Math.round(ch * ONE));
   // FIELD: text area = top-left position + (width, -height) extent (down is -Y).
   const maxLen = Math.max(1, ...t.lines.map(l => l.length));
@@ -178,10 +180,11 @@ function buildPalette(shapes: NapShape[], texts: NapText[], maxColors: number): 
   for (const s of shapes) add(s.color);
   for (const t of texts) add(t.color ?? DEFAULT_TEXT_COLOR);
   const sorted = [...freq.values()].sort((a, b) => b.n - a.n).map(e => e.c);
-  const black = sorted.find(c => c.r === 0 && c.g === 0 && c.b === 0);
   const rest = sorted.filter(c => !(c.r === 0 && c.g === 0 && c.b === 0));
-  const ordered = black ? [black, ...rest] : sorted;
-  return ordered.slice(0, maxColors);
+  // Black is always slot 0 — NAPLPS convention; TURSHOW treats slot 0 as the
+  // background colour after RESET. Without it the background turns the colour
+  // of whatever shape is most frequent (e.g. parchment grey).
+  return [{ r: 0, g: 0, b: 0 }, ...rest].slice(0, maxColors);
 }
 
 export function encodeNaplpsStandard(shapes: NapShape[], opts: EncodeOptions = {}): EncodeResult {
@@ -233,6 +236,12 @@ export function encodeNaplpsStandard(shapes: NapShape[], opts: EncodeOptions = {
 
   // Font text blocks last, on top of the graphics.
   for (const t of texts) emitText(out, t, slotOf);
+
+  // Trailer: SI (leave graphics mode) + DOS EOF, as in genuine period files
+  // (eagle1/santa end 0F 1A). Streaming decoders like TURSHOW only execute a
+  // command when the next non-operand byte arrives — without a trailer the
+  // final drawing command is silently dropped at EOF.
+  out.push(0x0f, 0x1a);
 
   return { bytes: Uint8Array.from(out), palette };
 }

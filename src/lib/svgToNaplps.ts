@@ -1,6 +1,7 @@
 import { NAPLPSColor } from './naplps';
 import { encodeNaplpsStandard, NapText } from './naplps-std-encoder';
 import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
+import { traceMaskToPolygons } from './regionTrace';
 
 // Set to true to enable detailed conversion debug logging in the browser console
 const DEBUG_SVG_NAPLPS = false;
@@ -41,6 +42,8 @@ export interface Rectangle {
 export interface PolygonShape {
   points: Array<{ x: number; y: number }>;
   color: string;
+  /** groups subpaths of one compound <path> element (even-odd holes) */
+  compoundId?: number;
 }
 
 // Parse the SVG string into a DOM once and build the shared class→fill map.
@@ -297,16 +300,14 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
     let prevCubicCtrl: XY | null = null;
     let prevQuadCtrl: XY | null = null;
 
+    // Buffer subpaths for this element: a multi-subpath (compound) path uses
+    // even-odd holes, so its rings must stay together — including rectangular
+    // hole rings, which must NOT be diverted into solid rects.
+    const elSubpaths: Array<Array<{ x: number; y: number }>> = [];
     const emitSubpath = (reason: string) => {
       if (currentPoints.length >= 3) {
-        const rect = extractRectIfAxisAligned(currentPoints, color);
-        if (rect) {
-          rects.push(rect);
-          if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}): 4 axis-aligned pts → rect x=${rect.x} y=${rect.y} w=${rect.width} h=${rect.height}`);
-        } else {
-          shapes.push({ points: [...currentPoints], color });
-          if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}): ${currentPoints.length} points → polygon #${shapes.length}`);
-        }
+        elSubpaths.push([...currentPoints]);
+        if (DEBUG_SVG_NAPLPS) console.log(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}): ${currentPoints.length} points`);
         subpathsEmitted++;
       } else if (currentPoints.length > 0) {
         if (DEBUG_SVG_NAPLPS) console.warn(`[svgToNaplps] path[${elIdx}] subpath closed (${reason}) but only ${currentPoints.length} point(s) — skipped (need ≥3)`);
@@ -465,6 +466,17 @@ export function parseSvgToPaths(doc: Document, cssMap: Map<string, string>): { r
       emitSubpath('end-of-path');
     }
 
+    if (elSubpaths.length === 1) {
+      // Single subpath: safe to specialize an axis-aligned quad into a rect.
+      const rect = extractRectIfAxisAligned(elSubpaths[0], color);
+      if (rect) rects.push(rect);
+      else shapes.push({ points: elSubpaths[0], color });
+    } else if (elSubpaths.length > 1) {
+      // Compound path: the rings form one even-odd region (holes). Tag them
+      // with a shared id so conversion rasterizes them together.
+      for (const ring of elSubpaths) shapes.push({ points: ring, color, compoundId: elIdx });
+    }
+
     if (skippedCommands.length > 0) {
       console.warn(`[svgToNaplps] path[${elIdx}] unsupported commands skipped: ${skippedCommands.join(', ')}`);
     }
@@ -575,6 +587,91 @@ export function optimizeRectangles(rectangles: Rectangle[]): Rectangle[] {
   return cur;
 }
 
+// TURSHOW hardware limits (empirically bisected — see regionTrace.ts): the
+// scanline fill mispairs beyond ~16 intersections per row, and polygons are
+// only proven safe up to 63 vertices. Polygons over either limit get cut in
+// half with a vertical line (halves the parallel strips a scanline crosses)
+// and re-checked recursively.
+const HW_MAX_VERTS = 63;
+const HW_MAX_CROSSINGS = 12;
+
+function hwMaxCrossings(pts: NapPoint[]): number {
+  let yMin = Infinity, yMax = -Infinity;
+  for (const p of pts) { if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y; }
+  const step = 0.75 / 480; // one VGA row in field units
+  let worst = 0;
+  for (let y = yMin + step / 2; y < yMax; y += step) {
+    let c = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[j], b = pts[i];
+      if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) c++;
+    }
+    if (c > worst) worst = c;
+  }
+  return worst;
+}
+
+// Repair an over-limit polygon by rasterizing it onto the VGA grid (even-odd
+// fill + boundary, like TURSHOW draws it) and re-tracing the mask into
+// hardware-safe pieces via regionTrace's splitting tracer. Geometric clipping
+// is NOT safe here: cutting a ring/comb with a line bridges disjoint lobes and
+// paints seams across whatever sits between them.
+// `rings` is one even-odd region: a single ring for a plain polygon, or all
+// subpath rings of a compound <path> (holes). Returns hole-free, limit-safe
+// polygon pieces.
+function hwSplitPolygon(rings: NapPoint[][]): NapPoint[][] {
+  const valid = rings.filter(r => r.length >= 3);
+  if (valid.length === 0) return [];
+  if (valid.length === 1 && valid[0].length <= HW_MAX_VERTS && hwMaxCrossings(valid[0]) <= HW_MAX_CROSSINGS) {
+    return [valid[0]];
+  }
+
+  const W = 640, H = 480;
+  const pxRings = valid.map(r => r.map(p => ({ x: p.x * W, y: (1 - p.y / 0.75) * H })));
+  const mask = new Uint8Array(W * H);
+  const set = (x: number, y: number) => {
+    if (x >= 0 && y >= 0 && x < W && y < H) mask[y * W + x] = 1;
+  };
+  // even-odd scanline fill at pixel centres, edges pooled across ALL rings —
+  // that is what makes an inner ring a hole
+  let yMin = Infinity, yMax = -Infinity;
+  for (const ring of pxRings) for (const p of ring) { if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y; }
+  const xs: number[] = [];
+  for (let y = Math.max(0, Math.floor(yMin)); y <= Math.min(H - 1, Math.ceil(yMax)); y++) {
+    const yc = y + 0.5;
+    xs.length = 0;
+    for (const ring of pxRings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const a = ring[j], b = ring[i];
+        if ((a.y <= yc && b.y > yc) || (b.y <= yc && a.y > yc)) {
+          xs.push(a.x + ((yc - a.y) / (b.y - a.y)) * (b.x - a.x));
+        }
+      }
+    }
+    xs.sort((p, q) => p - q);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      for (let x = Math.round(xs[k]); x <= Math.round(xs[k + 1]); x++) set(x, y);
+    }
+  }
+  // boundary pixels — keeps sub-pixel-thin strokes from vanishing entirely.
+  // Only for a single ring: painting a compound path's hole boundary would
+  // put a 1px rim of the fill colour inside the hole.
+  if (pxRings.length === 1) {
+    const ring = pxRings[0];
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[j], b = ring[i];
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y))));
+      for (let s = 0; s <= steps; s++) {
+        set(Math.round(a.x + ((b.x - a.x) * s) / steps), Math.round(a.y + ((b.y - a.y) * s) / steps));
+      }
+    }
+  }
+
+  const pieces = traceMaskToPolygons(mask, W, H);
+  if (pieces.length === 0) return valid.length === 1 ? [valid[0]] : [];
+  return pieces.map(piece => piece.map(q => ({ x: q.x / W, y: (1 - q.y / H) * 0.75 })));
+}
+
 // Convert an SVG (e.g. from a traced PNG) into a REAL standard NAPLPS .nap byte
 // stream — interleaved coordinates + indexed palette, readable by period tools.
 export async function svgToNaplpsStandard(
@@ -605,13 +702,22 @@ export async function svgToNaplpsStandard(
   const fieldH = opts.fieldHeight ?? 0.75;
   const m = opts.margin ?? 0.03;
   const boxX0 = m, boxY0 = m, boxW = 1 - 2 * m, boxH = fieldH - 2 * m;
-  const pxPerUnit = Math.max(width / boxW, height / boxH); // isotropic fit
-  const contentW = width / pxPerUnit, contentH = height / pxPerUnit;
-  const xOff = boxX0 + (boxW - contentW) / 2;
-  const yOff = boxY0 + (boxH - contentH) / 2; // NAPLPS-Y of the content's bottom
+  // Snap the scale so 1 source px = an integer number of encodable coordinate
+  // steps (LSB = 1/2048 field units), and the offsets onto that grid. Without
+  // this a 1px-wide shape can quantize to ZERO width (TURSHOW draws nothing)
+  // and abutting shapes round apart into background seams. Same scheme as the
+  // vectorizer worker.
+  const GRID = 2048;
+  const stepsPerPx = Math.max(1, Math.floor(Math.min(boxW / width, boxH / height) * GRID));
+  const s = stepsPerPx / GRID; // field units per source px
+  const contentW = width * s, contentH = height * s;
+  const xOff = Math.round((boxX0 + (boxW - contentW) / 2) * GRID) / GRID;
+  const yOff = Math.round((boxY0 + (boxH - contentH) / 2) * GRID) / GRID; // NAPLPS-Y of content bottom
   const norm = (p: { x: number; y: number }): NapPoint => ({
-    x: xOff + (p.x / width) * contentW,
-    y: yOff + (1 - p.y / height) * contentH,
+    // snap each coordinate to the grid: Illustrator emits fractional px, and
+    // half-step positions would still round unpredictably at encode time
+    x: Math.round((xOff + p.x * s) * GRID) / GRID,
+    y: Math.round((yOff + (height - p.y) * s) * GRID) / GRID,
   });
   const toColor = (c: string): NapColor => {
     const k = parseColor(c);
@@ -650,13 +756,31 @@ export async function svgToNaplpsStandard(
       ],
     });
   }
+  // Group compound-path rings (holes) so they resolve as ONE even-odd region;
+  // standalone polygons pass through as single rings.
+  const groups = new Map<string, { color: NapColor; rings: NapPoint[][] }>();
+  let soloId = 0;
   for (const shape of [...polygons, ...paths]) {
     const simplified = dpSimplify(shape.points, DP_TOLERANCE);
     if (simplified.length < 3) continue;
-    if (bboxArea(simplified) < minArea) continue;
+    // minArea despeckles standalone fragments; never drop a compound's ring —
+    // losing a hole ring would fill the hole solid.
+    if (shape.compoundId === undefined && bboxArea(simplified) < minArea) continue;
     const color = toColor(shape.color);
     if (isExcluded(color)) continue;
-    shapes.push({ type: 'polygon', filled: true, color, points: simplified.map(norm) });
+    const key = shape.compoundId !== undefined ? `c${shape.compoundId}` : `s${soloId++}`;
+    const g = groups.get(key) ?? { color, rings: [] };
+    g.rings.push(simplified.map(norm));
+    groups.set(key, g);
+  }
+  for (const g of groups.values()) {
+    if (g.rings.length === 1) {
+      shapes.push({ type: 'polygon', filled: true, color: g.color, points: g.rings[0] });
+    } else {
+      for (const piece of hwSplitPolygon(g.rings)) {
+        shapes.push({ type: 'polygon', filled: true, color: g.color, points: piece });
+      }
+    }
   }
   for (const shape of circles) {
     if (bboxArea(shape.points) < minArea) continue;
@@ -665,7 +789,30 @@ export async function svgToNaplpsStandard(
     shapes.push({ type: 'polygon', filled: true, color, points: shape.points.map(norm) });
   }
 
-  return encodeNaplpsStandard(shapes, { maxColors: opts.maxColors, texts: opts.texts }).bytes;
+  // Enforce TURSHOW's fill limits on every polygon before encoding.
+  const safeShapes: Array<NapShape & { sortArea: number }> = [];
+  const shoelace = (pts: NapPoint[]) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return Math.abs(a) / 2;
+  };
+  for (const s of shapes) {
+    const pieces = s.type === 'polygon' && s.points.length > 4 ? hwSplitPolygon([s.points]) : [s.points];
+    // Split pieces sort by the PARENT's area so containers stay behind contents.
+    const area = shoelace(s.points);
+    for (const piece of pieces) safeShapes.push({ ...s, points: piece, sortArea: area });
+  }
+  // Painter's order by filled area, not SVG element type/document order: our
+  // shape extraction batches per type (rects, then polygons…), which buries
+  // small details (thin hatch rects) under large fills drawn later, and a
+  // compound path's hole subpath fills solid over everything inside it. Largest
+  // first guarantees whatever a shape encloses is painted after it.
+  safeShapes.sort((a, b) => b.sortArea - a.sortArea);
+
+  return encodeNaplpsStandard(safeShapes, { maxColors: opts.maxColors, texts: opts.texts }).bytes;
 }
 
 // Get statistics about the conversion

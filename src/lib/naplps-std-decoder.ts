@@ -79,8 +79,10 @@ function getnum(ops: number[], mvl: number): NapPoint {
     x |= ((b & 0x38) << 8) >> (i * 3);
     y |= ((b & 0x07) << 11) >> (i * 3);
   }
-  if (x > ONE) x -= ONE * 2;
-  if (y > ONE) y -= ONE * 2;
+  // >= : raw ONE (8192) is exactly -1.0 in two's complement, not +1.0 — period
+  // decoders (TURSHOW) treat the top half of the range as negative unconditionally.
+  if (x >= ONE) x -= ONE * 2;
+  if (y >= ONE) y -= ONE * 2;
   return { x: x / ONE, y: y / ONE };
 }
 
@@ -136,8 +138,47 @@ function decodeColor(ops: number[], mvl: number): NapColor {
   return { r: norm(r), g: norm(g), b: norm(b) };
 }
 
+// Normalize PRODIGY 8-bit protocol encoding → standard 7-bit NAPLPS.
+//
+// PRODIGY sets bit 7 on ALL protocol bytes (opcodes 0xA0-0xBF, operands 0xC0-0xFF)
+// to distinguish them from literal text content (bytes < 0x80). TURSHOW does the
+// same strip (confirmed in decompiled TURSHOW.c: `byte & 0x7f` unconditionally).
+//
+// Detection: if an 8-bit opcode (0xA0-0xBF) appears before any 7-bit opcode (0x20-0x3F).
+// After normalization the existing 7-bit decoder runs unchanged.
+function normalizeIfEightBit(buf: Uint8Array): Uint8Array {
+  let eightBit = false;
+  for (let i = 0; i < Math.min(buf.length, 64); i++) {
+    const b = buf[i];
+    if (b >= 0xA0 && b <= 0xBF) { eightBit = true; break; }
+    if (b >= 0x20 && b <= 0x3F) break; // 7-bit opcode found first
+  }
+  if (!eightBit) return buf;
+
+  const out: number[] = [];
+  let i = 0;
+  while (i < buf.length) {
+    const b = buf[i++];
+    if (b >= 0xA0 && b <= 0xBF) {
+      const op = b & 0x7F;
+      out.push(op);
+      if (op === 0x22) {
+        // TEXT opcode: skip all following bytes (operands + attribute codes + literal
+        // ASCII) until the next opcode byte (0xA0-0xBF). We don't render text.
+        while (i < buf.length && !(buf[i] >= 0xA0 && buf[i] <= 0xBF)) i++;
+      }
+    } else if (b >= 0xC0) {
+      out.push(b & 0x7F); // operand byte — strip high bit
+    }
+    // bytes < 0xA0: SO/SI control codes, filler, literal text outside TEXT runs — skip
+  }
+  return Uint8Array.from(out);
+}
+
 export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeResult {
-  const buf = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  const buf = normalizeIfEightBit(
+    bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)
+  );
   const shapes: NapShape[] = [];
   const palette: NapColor[] = DEFAULT_PALETTE.map(c => ({ ...c }));
   const commandCounts: Record<string, number> = {};
@@ -196,7 +237,10 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
       shapes.push({ type: 'point', points: [pts[0]], color: curColor, filled: true });
       cur = pts[pts.length - 1];
     } else if (LINE_OPS.has(b)) {
-      shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
+      // SET& variants (0x2a, 0x2b) provide an explicit start — don't prepend cur.
+      // Plain variants (0x28, 0x29) start from the current point — prepend cur.
+      const setLine = b === 0x2a || b === 0x2b;
+      shapes.push({ type: 'polyline', points: setLine ? pts : [cur, ...pts], color: curColor, filled: false });
       cur = pts[pts.length - 1];
     } else if (ARC_OPS.has(b)) {
       // SET variants carry the points directly; plain arcs start from the current point.
