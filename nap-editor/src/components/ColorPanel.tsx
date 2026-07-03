@@ -31,10 +31,11 @@ interface Props {
   onSortByColor: () => void
   /** tolerance in field units (0..1 space) */
   onSimplify: (tolerance: number) => void
+  onConvertToLines: () => void
 }
 
 export default function ColorPanel({
-  shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify,
+  shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify, onConvertToLines,
 }: Props) {
   const [recolorHex, setRecolorHex] = useState('#ffffff')
   const [simplifyPx, setSimplifyPx] = useState(1)
@@ -122,6 +123,14 @@ export default function ColorPanel({
             style={{ fontSize: 11, padding: '3px 8px' }}
           >
             Sort by color
+          </button>
+          <button
+            onClick={onConvertToLines}
+            disabled={selCount === 0}
+            title="Turn filled shapes into 1px closed line loops (SET&LINE). Best for straight strokes — TURSHOW draws tight curves dashed."
+            style={{ fontSize: 11, padding: '3px 8px' }}
+          >
+            To lines
           </button>
         </div>
       </div>

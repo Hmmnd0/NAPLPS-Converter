@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { renderTurshowSim, SIM_W, SIM_H } from '@lib/turshowSim'
 import type { NapShape } from '@lib/naplps-std-decoder'
+import type { Tool } from '../App'
 
 // NAPLPS field: x ∈ [0,1], y ∈ [0,0.75], Y-up.
 // Natural SVG space: 1000×750px, Y-down.
@@ -58,15 +60,27 @@ interface Props {
   onSelect: (ids: Set<number>) => void
   onMove: (movedShapes: NapShape[]) => void
   handle?: React.MutableRefObject<CanvasHandle | null>
+  tool?: Tool
+  /** TURSHOW-faithful raster preview instead of the editable vector view */
+  preview?: boolean
+  /** hex colour for the line tool */
+  drawColor?: string
+  onAddShape?: (shape: NapShape) => void
 }
 
-export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }: Props) {
+export default function Canvas({
+  shapes, selectedIds, onSelect, onMove, handle,
+  tool = 'select', preview = false, drawColor = '#ffffff', onAddShape,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [tf, setTf] = useState<Transform>({ zoom: 1, panX: 0, panY: 0 })
   const [rubber, setRubber] = useState<RubberBand | null>(null)
   const [hovered, setHovered] = useState<number | null>(null)
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null)
+  // Line tool draft, in NAPLPS field coordinates
+  const [draft, setDraft] = useState<Array<{ x: number; y: number }>>([])
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null)
 
   // Refs to avoid stale closures in event handlers
   const tfRef = useRef(tf)
@@ -245,6 +259,55 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
     }
   }, [rubber]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
 
+  // TURSHOW preview raster
+  useEffect(() => {
+    if (!preview) return
+    const canvas = previewCanvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    const frame = renderTurshowSim(shapes)
+    // copy into a fresh buffer: ImageData's typing rejects ArrayBufferLike
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(frame.pixels), frame.width, frame.height), 0, 0)
+  }, [preview, shapes])
+
+  // screen coords → NAPLPS field coords
+  const screenToField = useCallback((clientX: number, clientY: number) => {
+    const el = containerRef.current
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const { zoom, panX, panY } = tfRef.current
+    const natX = (clientX - rect.left - panX) / zoom
+    const natY = (clientY - rect.top - panY) / zoom
+    return { x: natX / NW, y: 0.75 - natY / NW }
+  }, [])
+
+  const commitDraft = useCallback(() => {
+    setDraft(d => {
+      if (d.length >= 2 && onAddShape) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
+        const color = m
+          ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+          : { r: 255, g: 255, b: 255 }
+        onAddShape({ type: 'polyline', filled: false, color, points: d })
+      }
+      return []
+    })
+  }, [onAddShape, drawColor])
+
+  // line tool keys: Enter commits, Escape cancels
+  useEffect(() => {
+    if (tool !== 'line') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitDraft() }
+      if (e.key === 'Escape') setDraft([])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tool, commitDraft])
+
+  // leaving the tool or entering preview drops any draft
+  useEffect(() => { if (tool !== 'line' || preview) setDraft([]) }, [tool, preview])
+
   const onSvgMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (e.button === 1 || spaceHeld) {
       e.preventDefault()
@@ -253,6 +316,14 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
       return
     }
     if (e.button !== 0) return
+
+    if (preview) return // view-only; pan/zoom still available
+
+    if (tool === 'line') {
+      const p = screenToField(e.clientX, e.clientY)
+      if (p) setDraft(d => [...d, p])
+      return
+    }
 
     const target = e.target as SVGElement
     const idxStr = target.dataset.idx
@@ -293,6 +364,7 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
   const isDragging = dragOffset !== null
   const cursor = spaceHeld
     ? (pointerMode.current === 'pan' ? 'grabbing' : 'grab')
+    : tool === 'line' && !preview ? 'crosshair'
     : isDragging ? 'move' : 'default'
 
   return (
@@ -300,16 +372,30 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
       ref={containerRef}
       style={{ flex: 1, position: 'relative', overflow: 'hidden', cursor, background: '#111' }}
     >
+      {preview && (
+        <canvas
+          ref={previewCanvasRef}
+          width={SIM_W}
+          height={SIM_H}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            transformOrigin: '0 0',
+            transform: `translate(${panX}px,${panY}px) scale(${(zoom * NW) / SIM_W},${(zoom * NH) / SIM_H})`,
+            imageRendering: 'pixelated',
+          }}
+        />
+      )}
       <svg
         width="100%"
         height="100%"
         style={{ display: 'block', position: 'absolute', inset: 0 }}
         onMouseDown={onSvgMouseDown}
+        onDoubleClick={tool === 'line' && !preview ? () => commitDraft() : undefined}
       >
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
-          <rect x={0} y={0} width={NW} height={NH} fill="#000" />
+          {!preview && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
 
-          {shapes.map((shape, i) => {
+          {!preview && shapes.map((shape, i) => {
             const selected = selectedIds.has(i)
             const hov = hovered === i && !selected
             const pts = selected && dragOffset
@@ -365,6 +451,23 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
               />
             )
           })}
+
+          {/* line-tool draft */}
+          {draft.length > 0 && (
+            <g pointerEvents="none">
+              <polyline
+                points={pointsStr(draft)}
+                fill="none"
+                stroke={drawColor}
+                strokeWidth={1.5 / zoom}
+                strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+              />
+              {draft.map((p, i) => {
+                const sp = toSvg(p)
+                return <circle key={i} cx={sp.x} cy={sp.y} r={2.5 / zoom} fill="#0a84ff" />
+              })}
+            </g>
+          )}
         </g>
       </svg>
 
@@ -395,6 +498,8 @@ export default function Canvas({ shapes, selectedIds, onSelect, onMove, handle }
       }}>
         {Math.round(zoom * 100)}%
         {isDragging && <span style={{ marginLeft: 8 }}>moving…</span>}
+        {preview && <span style={{ marginLeft: 8, color: '#e6a23c' }}>TURSHOW preview</span>}
+        {draft.length > 0 && <span style={{ marginLeft: 8 }}>{draft.length} pts — Enter/double-click to finish, Esc to cancel</span>}
       </div>
     </div>
   )

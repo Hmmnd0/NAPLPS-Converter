@@ -1,11 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Canvas, { type CanvasHandle } from './components/Canvas'
 import ColorPanel from './components/ColorPanel'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard } from '@lib/naplps-std-encoder'
 import { dpSimplify, simplifyForHardware } from '@lib/regionTrace'
+import { lintShapes, splitPolygonForHardware } from '@lib/turshowSim'
 import polygonClipping from 'polygon-clipping'
 import type { NapShape } from '@lib/naplps-std-decoder'
+
+export type Tool = 'select' | 'line'
 
 // Period renderers (TURSHOW etc.) use fixed static vertex buffers — same cap as
 // the converter pipeline's MAX_POLY_VERTS.
@@ -62,6 +65,9 @@ export default function App() {
   const [history, setHistory] = useState<NapShape[][]>([])
   const [future, setFuture] = useState<NapShape[][]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [tool, setTool] = useState<Tool>('select')
+  const [preview, setPreview] = useState(false)
+  const [drawColor, setDrawColor] = useState('#ff4040')
   const [filePath, setFilePath] = useState<string | null>(null)
   const [fileName, setFileName] = useState('Untitled')
   const [dirty, setDirty] = useState(false)
@@ -160,6 +166,36 @@ export default function App() {
     mutate(shapes.map((s, i) => selectedIds.has(i) ? { ...s, color: { r, g, b } } : s))
   }, [shapes, selectedIds, mutate])
 
+  const addShape = useCallback((shape: NapShape) => {
+    setShapes(prev => { pushHistory(prev); return [...prev, shape] })
+  }, [pushHistory])
+
+  // Convert selected filled shapes into closed 1px line loops. Caveat shown in
+  // the UI: TURSHOW's line rasterizer drops each segment's last pixel, so
+  // curves made of short segments render dashed — best for straight strokes.
+  const convertSelectedToLines = useCallback(() => {
+    if (!selectedIds.size) return
+    mutate(shapes.map((s, i) => {
+      if (!selectedIds.has(i) || s.type !== 'polygon' || s.points.length < 3) return s
+      return { ...s, type: 'polyline' as const, filled: false, points: [...s.points, s.points[0]] }
+    }))
+  }, [shapes, selectedIds, mutate])
+
+  // TURSHOW hardware linter: flag filled polygons over the fill-buffer limits.
+  const lint = useMemo(() => lintShapes(shapes), [shapes])
+  const autoSplitFlagged = useCallback(() => {
+    if (!lint.length) return
+    const flagged = new Set(lint.map(l => l.index))
+    const next: NapShape[] = []
+    shapes.forEach((s, i) => {
+      if (!flagged.has(i)) { next.push(s); return }
+      const pieces = splitPolygonForHardware(s.points)
+      if (pieces.length === 0) { next.push(s); return }
+      for (const points of pieces) next.push({ ...s, points })
+    })
+    mutate(next)
+  }, [shapes, lint, mutate])
+
   // tolerance is in field units (ColorPanel converts from its pixel slider).
   const simplifySelected = useCallback((tolerance: number) => {
     if (!selectedIds.size || tolerance <= 0) return
@@ -194,6 +230,9 @@ export default function App() {
       if (e.key === 'z' && meta && e.shiftKey) { e.preventDefault(); redo(); return }
       if (e.key === 'a' && meta) { e.preventDefault(); setSelectedIds(new Set(shapes.map((_, i) => i))); return }
       if (e.key === 'Escape') { setSelectedIds(new Set()); return }
+      if (e.key === 'v' && !meta) { setTool('select'); return }
+      if (e.key === 'l' && !meta) { setTool('line'); return }
+      if (e.key === 'p' && !meta) { setPreview(p => !p); return }
       if (e.key === 'm' && meta) { e.preventDefault(); mergeSelected(); return }
       if (e.key === '=' && meta) { e.preventDefault(); canvasHandle.current?.zoomIn(); return }
       if (e.key === '-' && meta) { e.preventDefault(); canvasHandle.current?.zoomOut(); return }
@@ -255,6 +294,34 @@ export default function App() {
           <button className="icon-btn" title="Undo (⌘Z)" onClick={undo} disabled={!history.length}>↩</button>
           <button className="icon-btn" title="Redo (⌘⇧Z)" onClick={redo} disabled={!future.length}>↪</button>
           <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
+          <button
+            className="icon-btn"
+            title="Select tool (V)"
+            onClick={() => setTool('select')}
+            style={tool === 'select' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >⬚</button>
+          <button
+            className="icon-btn"
+            title="Line tool (L) — click to add points, Enter/double-click to finish, Esc to cancel. Best for straight strokes: TURSHOW dashes tight curves."
+            onClick={() => setTool('line')}
+            style={tool === 'line' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >╱</button>
+          {tool === 'line' && (
+            <input
+              type="color"
+              value={drawColor}
+              onChange={e => setDrawColor(e.target.value)}
+              title="Line colour"
+              style={{ width: 26, height: 24, padding: 1, alignSelf: 'center' }}
+            />
+          )}
+          <button
+            className="icon-btn"
+            title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
+            onClick={() => setPreview(p => !p)}
+            style={preview ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >▶</button>
+          <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
           <button className="icon-btn" title="Zoom In (⌘=)" onClick={() => canvasHandle.current?.zoomIn()}>+</button>
           <button className="icon-btn" title="Zoom Out (⌘-)" onClick={() => canvasHandle.current?.zoomOut()}>−</button>
           <button className="icon-btn" title="Fit to Window (⌘0)" onClick={() => canvasHandle.current?.fitToWindow()}>⊞</button>
@@ -292,6 +359,10 @@ export default function App() {
               onSelect={setSelectedIds}
               onMove={moveShapes}
               handle={canvasHandle}
+              tool={tool}
+              preview={preview}
+              drawColor={drawColor}
+              onAddShape={addShape}
             />
             <ColorPanel
               shapes={shapes}
@@ -302,6 +373,7 @@ export default function App() {
               onRecolor={recolorSelected}
               onSortByColor={sortByColor}
               onSimplify={simplifySelected}
+              onConvertToLines={convertSelectedToLines}
             />
           </>
         )}
@@ -323,6 +395,18 @@ export default function App() {
         }}>
           <span>{shapes.length} shapes</span>
           {selectedIds.size > 0 && <span>{selectedIds.size} selected</span>}
+          {lint.length > 0 && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#e6a23c' }}>
+              <span
+                style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                title="Select the offending shapes"
+                onClick={() => setSelectedIds(new Set(lint.map(l => l.index)))}
+              >
+                ⚠ {lint.length} shape{lint.length !== 1 ? 's' : ''} exceed TURSHOW fill limits
+              </span>
+              <button style={{ fontSize: 10, padding: '1px 6px' }} onClick={autoSplitFlagged}>Auto-split</button>
+            </span>
+          )}
           <span style={{ marginLeft: 'auto' }}>Space+drag to pan · ⌘scroll to zoom · Shift+click/drag to add to selection</span>
         </div>
       )}
