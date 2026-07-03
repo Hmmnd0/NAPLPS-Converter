@@ -1,7 +1,7 @@
 import { NAPLPSColor } from './naplps';
 import { encodeNaplpsStandard, NapText } from './naplps-std-encoder';
 import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
-import { traceMaskToPolygons } from './regionTrace';
+import { dpSimplify, traceMaskToPolygons } from './regionTrace';
 
 // Set to true to enable detailed conversion debug logging in the browser console
 const DEBUG_SVG_NAPLPS = false;
@@ -11,25 +11,10 @@ const DEBUG_SVG_NAPLPS = false;
 // Raise toward 1.5 to smooth more aggressively (smaller files, more distortion).
 const DP_TOLERANCE = 0.5;
 
-export function dpSimplify(pts: Array<{ x: number; y: number }>, tol: number): Array<{ x: number; y: number }> {
-  if (pts.length <= 2) return pts;
-  const p1 = pts[0], p2 = pts[pts.length - 1];
-  const dx = p2.x - p1.x, dy = p2.y - p1.y;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  let maxDist = 0, maxIdx = 0;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const dist = len === 0
-      ? Math.sqrt((pts[i].x - p1.x) ** 2 + (pts[i].y - p1.y) ** 2)
-      : Math.abs(dy * pts[i].x - dx * pts[i].y + p2.x * p1.y - p2.y * p1.x) / len;
-    if (dist > maxDist) { maxDist = dist; maxIdx = i; }
-  }
-  if (maxDist > tol) {
-    const L = dpSimplify(pts.slice(0, maxIdx + 1), tol);
-    const R = dpSimplify(pts.slice(maxIdx), tol);
-    return [...L.slice(0, -1), ...R];
-  }
-  return [pts[0], pts[pts.length - 1]];
-}
+// Douglas-Peucker lives in regionTrace (iterative — safe on long traced
+// boundaries where a recursive version can overflow the stack). Re-exported
+// because this module's callers and tests historically import it from here.
+export { dpSimplify };
 
 export interface Rectangle {
   x: number;

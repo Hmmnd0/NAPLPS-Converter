@@ -39,28 +39,6 @@ export function dpSimplify(pts: Array<{ x: number; y: number }>, tol: number): A
   return pts.filter((_, i) => keep[i]);
 }
 
-// Chaikin corner-cutting: each edge is replaced by two points at 1/4 and 3/4
-// along it. Converts pixel-boundary staircases into smooth curves that DP can
-// then approximate cleanly with diagonal line segments.
-export function chaikinSmooth(
-  pts: Array<{ x: number; y: number }>,
-  iterations = 2
-): Array<{ x: number; y: number }> {
-  let p = pts
-  for (let iter = 0; iter < iterations; iter++) {
-    const out: Array<{ x: number; y: number }> = []
-    const n = p.length
-    for (let i = 0; i < n; i++) {
-      const a = p[i]
-      const b = p[(i + 1) % n]
-      out.push({ x: 0.75 * a.x + 0.25 * b.x, y: 0.75 * a.y + 0.25 * b.y })
-      out.push({ x: 0.25 * a.x + 0.75 * b.x, y: 0.25 * a.y + 0.75 * b.y })
-    }
-    p = out
-  }
-  return p
-}
-
 // Hard cap on vertices per polygon — period renderers (TURSHOW etc.) have fixed
 // static vertex buffers. If DP still leaves too many points, raise epsilon until
 // the polygon fits. Seams from the diagonal approximations are sub-pixel at

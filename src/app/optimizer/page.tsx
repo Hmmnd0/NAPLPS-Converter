@@ -10,33 +10,10 @@ import { traceMaskToPolygons } from "@/lib/regionTrace";
 const key = (c: NapColor) => `${c.r},${c.g},${c.b}`;
 const hex = (c: NapColor) =>
   "#" + [c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, "0")).join("");
-const dist = (a: NapColor, b: NapColor) =>
-  Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
 
 const SELECTED: NapColor = { r: 255, g: 0, b: 255 }; // magenta
 const HOVERED: NapColor = { r: 0, g: 230, b: 255 }; // cyan
 const dim = (c: NapColor): NapColor => ({ r: Math.round(c.r * 0.22), g: Math.round(c.g * 0.22), b: Math.round(c.b * 0.22) });
-
-// Greedy palette merge: the most-used colours become representatives; any colour
-// within `threshold` RGB distance snaps to the nearest. Preserves order/count.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function mergeColors(shapes: NapShape[], threshold: number): NapShape[] {
-  if (threshold <= 0) return shapes;
-  const counts = new Map<string, { color: NapColor; count: number }>();
-  for (const s of shapes) {
-    const e = counts.get(key(s.color));
-    if (e) e.count++;
-    else counts.set(key(s.color), { color: s.color, count: 1 });
-  }
-  const reps: NapColor[] = [];
-  const mapping = new Map<string, NapColor>();
-  for (const { color } of [...counts.values()].sort((a, b) => b.count - a.count)) {
-    const rep = reps.find((r) => dist(color, r) <= threshold);
-    if (rep) mapping.set(key(color), rep);
-    else { reps.push(color); mapping.set(key(color), color); }
-  }
-  return shapes.map((s) => ({ ...s, color: mapping.get(key(s.color)) ?? s.color }));
-}
 
 function bbox(points: NapPoint[]) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
