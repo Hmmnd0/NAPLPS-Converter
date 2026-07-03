@@ -32,10 +32,11 @@ interface Props {
   /** tolerance in field units (0..1 space) */
   onSimplify: (tolerance: number) => void
   onConvertToLines: () => void
+  onReorder: (where: 'back' | 'front' | 'down' | 'up') => void
 }
 
 export default function ColorPanel({
-  shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify, onConvertToLines,
+  shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify, onConvertToLines, onReorder,
 }: Props) {
   const [recolorHex, setRecolorHex] = useState('#ffffff')
   const [simplifyPx, setSimplifyPx] = useState(1)
@@ -132,6 +133,16 @@ export default function ColorPanel({
           >
             To lines
           </button>
+        </div>
+        {/* Draw order: shapes later in the file draw later = on top */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+            Draw order
+          </span>
+          <button onClick={() => onReorder('back')} disabled={selCount === 0} title="Draw first — bottom of the stack, everything else paints over it" style={{ fontSize: 11, padding: '3px 8px' }}>⤒</button>
+          <button onClick={() => onReorder('down')} disabled={selCount === 0} title="Draw one step earlier" style={{ fontSize: 11, padding: '3px 8px' }}>↑</button>
+          <button onClick={() => onReorder('up')} disabled={selCount === 0} title="Draw one step later" style={{ fontSize: 11, padding: '3px 8px' }}>↓</button>
+          <button onClick={() => onReorder('front')} disabled={selCount === 0} title="Draw last — top of the stack, paints over everything" style={{ fontSize: 11, padding: '3px 8px' }}>⤓</button>
         </div>
       </div>
 

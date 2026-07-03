@@ -10,6 +10,10 @@ import type { NapShape } from '@lib/naplps-std-decoder'
 
 export type Tool = 'select' | 'line'
 
+function fmtBytes(n: number) {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`
+}
+
 // Period renderers (TURSHOW etc.) use fixed static vertex buffers — same cap as
 // the converter pipeline's MAX_POLY_VERTS.
 const MAX_VERTS = 64
@@ -180,6 +184,33 @@ export default function App() {
       return { ...s, type: 'polyline' as const, filled: false, points: [...s.points, s.points[0]] }
     }))
   }, [shapes, selectedIds, mutate])
+
+  // Live encoded size; period viewers display at ~13k baud so bytes = seconds.
+  const napSize = useMemo(() => {
+    if (!shapes.length) return 0
+    try { return encodeNaplpsStandard(shapes).bytes.length } catch { return 0 }
+  }, [shapes])
+
+  // Draw order: later in the array = drawn later = on top.
+  const reorderSelected = useCallback((where: 'back' | 'front' | 'down' | 'up') => {
+    if (!selectedIds.size) return
+    let arr = shapes.map((s, i) => ({ s, sel: selectedIds.has(i) }))
+    if (where === 'back') arr = [...arr.filter(a => a.sel), ...arr.filter(a => !a.sel)]
+    else if (where === 'front') arr = [...arr.filter(a => !a.sel), ...arr.filter(a => a.sel)]
+    else if (where === 'down') {
+      for (let i = 1; i < arr.length; i++) {
+        if (arr[i].sel && !arr[i - 1].sel) { const t = arr[i - 1]; arr[i - 1] = arr[i]; arr[i] = t }
+      }
+    } else {
+      for (let i = arr.length - 2; i >= 0; i--) {
+        if (arr[i].sel && !arr[i + 1].sel) { const t = arr[i + 1]; arr[i + 1] = arr[i]; arr[i] = t }
+      }
+    }
+    const nextSel = new Set<number>()
+    arr.forEach((a, i) => { if (a.sel) nextSel.add(i) })
+    setShapes(prev => { pushHistory(prev); return arr.map(a => a.s) })
+    setSelectedIds(nextSel)
+  }, [shapes, selectedIds, pushHistory])
 
   // TURSHOW hardware linter: flag filled polygons over the fill-buffer limits.
   const lint = useMemo(() => lintShapes(shapes), [shapes])
@@ -374,6 +405,7 @@ export default function App() {
               onSortByColor={sortByColor}
               onSimplify={simplifySelected}
               onConvertToLines={convertSelectedToLines}
+              onReorder={reorderSelected}
             />
           </>
         )}
@@ -394,6 +426,9 @@ export default function App() {
           flexShrink: 0,
         }}>
           <span>{shapes.length} shapes</span>
+          <span title="Encoded .nap size — period viewers display at ~13k baud, so bytes are seconds">
+            {fmtBytes(napSize)} · ~{Math.max(1, Math.round((napSize * 10) / 13288))}s @ 13k baud
+          </span>
           {selectedIds.size > 0 && <span>{selectedIds.size} selected</span>}
           {lint.length > 0 && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#e6a23c' }}>
