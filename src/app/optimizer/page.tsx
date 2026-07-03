@@ -5,7 +5,7 @@ import AppHeader from "@/components/AppHeader";
 import { decodeNaplpsStandard, type NapShape, type NapColor, type NapPoint } from "@/lib/naplps-std-decoder";
 import { encodeNaplpsStandard } from "@/lib/naplps-std-encoder";
 import { rasterizeNaplps } from "@/lib/naplpsRaster";
-import { labelComponents, traceEdges, simplifyForHardware } from "@/lib/regionTrace";
+import { traceMaskToPolygons } from "@/lib/regionTrace";
 
 const key = (c: NapColor) => `${c.r},${c.g},${c.b}`;
 const hex = (c: NapColor) =>
@@ -84,20 +84,14 @@ function mergeShapesIntoPolys(selectedShapes: NapShape[]): NapShape[] {
         mask[py * MERGE_W + px] = 1;
   }
 
-  const { labels, comps } = labelComponents(mask, MERGE_W, MERGE_H);
-  const maxPts = Math.max(8000, 4 * (MERGE_W + MERGE_H));
+  // Trace with the TURSHOW hardware caps enforced (≤12 scanline crossings,
+  // ≤60 vertices per piece) — same tracer as the conversion pipelines.
   const result: NapShape[] = [];
-
-  for (const comp of comps) {
-    const raw = traceEdges(labels, comp.label, comp.startX, comp.startY, MERGE_W, MERGE_H, maxPts);
-    // Simplify in pixel space (epsilon=1.5px), then convert to NAPLPS coords.
-    // Converting first and simplifying in 0–1 space would make epsilon 1.5× the
-    // entire field width, collapsing every polygon to 2 points.
-    const simplified = simplifyForHardware(raw, 1.5);
-    if (simplified.length < 3) continue;
+  for (const piece of traceMaskToPolygons(mask, MERGE_W, MERGE_H)) {
+    if (piece.length < 3) continue;
     result.push({
       type: 'polygon', filled: true, color,
-      points: simplified.map(p => ({
+      points: piece.map(p => ({
         x: p.x / MERGE_W,
         y: 0.75 - (p.y / MERGE_H) * 0.75,
       })),
