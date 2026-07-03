@@ -358,7 +358,7 @@ export default function Canvas({
     if (!e.shiftKey) onSelect(new Set())
     pointerMode.current = 'rubber'
     setRubber({ sx: e.clientX, sy: e.clientY, ex: e.clientX, ey: e.clientY })
-  }, [spaceHeld, selectedIds, onSelect, shapes])
+  }, [spaceHeld, selectedIds, onSelect, shapes, tool, preview, screenToField])
 
   const { zoom, panX, panY } = tf
   const isDragging = dragOffset !== null
