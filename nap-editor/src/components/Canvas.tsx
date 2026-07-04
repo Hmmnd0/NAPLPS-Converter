@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { renderTurshowSim, SIM_W, SIM_H } from '@lib/turshowSim'
-import type { NapShape } from '@lib/naplps-std-decoder'
+import type { NapShape, NapPoint } from '@lib/naplps-std-decoder'
+import type { NapText } from '@lib/naplps-std-encoder'
 import type { Tool } from '../App'
 
 // NAPLPS field: x ∈ [0,1], y ∈ [0,0.75], Y-up.
@@ -63,14 +64,21 @@ interface Props {
   tool?: Tool
   /** TURSHOW-faithful raster preview instead of the editable vector view */
   preview?: boolean
-  /** hex colour for the line tool */
+  /** hex colour for the line/text tools */
   drawColor?: string
   onAddShape?: (shape: NapShape) => void
+  onEditPoints?: (shapeIdx: number, points: NapPoint[]) => void
+  texts?: NapText[]
+  selectedText?: number | null
+  onSelectText?: (i: number | null) => void
+  onAddText?: (t: NapText) => void
+  onUpdateText?: (i: number, patch: Partial<NapText>) => void
 }
 
 export default function Canvas({
   shapes, selectedIds, onSelect, onMove, handle,
   tool = 'select', preview = false, drawColor = '#ffffff', onAddShape,
+  onEditPoints, texts = [], selectedText = null, onSelectText, onAddText, onUpdateText,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [tf, setTf] = useState<Transform>({ zoom: 1, panX: 0, panY: 0 })
@@ -81,6 +89,16 @@ export default function Canvas({
   // Line tool draft, in NAPLPS field coordinates
   const [draft, setDraft] = useState<Array<{ x: number; y: number }>>([])
   const previewCanvasRef = useRef<HTMLCanvasElement>(null)
+  // Vertex editing: which shape is in vertex mode, live-dragged points
+  const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [editPts, setEditPts] = useState<NapPoint[] | null>(null)
+  const editIdxRef = useRef(editIdx)
+  useEffect(() => { editIdxRef.current = editIdx }, [editIdx])
+  const editPtsRef = useRef(editPts)
+  useEffect(() => { editPtsRef.current = editPts }, [editPts])
+  const vertexDrag = useRef<{ vi: number } | null>(null)
+  // Text block dragging
+  const textDrag = useRef<{ ti: number; startX: number; startY: number; origX: number; origY: number } | null>(null)
 
   // Refs to avoid stale closures in event handlers
   const tfRef = useRef(tf)
@@ -102,7 +120,7 @@ export default function Canvas({
     originalShapes: NapShape[]
     moved: boolean
   } | null>(null)
-  const pointerMode = useRef<'none' | 'pan' | 'drag' | 'rubber'>('none')
+  const pointerMode = useRef<'none' | 'pan' | 'drag' | 'rubber' | 'vertex' | 'text'>('none')
 
   const fitToWindow = useCallback(() => {
     const el = containerRef.current
@@ -187,6 +205,23 @@ export default function Canvas({
 
       if (mode === 'rubber') {
         setRubber(r => r ? { ...r, ex: e.clientX, ey: e.clientY } : null)
+        return
+      }
+
+      if (mode === 'vertex' && vertexDrag.current) {
+        const vi = vertexDrag.current.vi
+        const natX = (e.clientX - rect.left - panX) / zoom
+        const natY = (e.clientY - rect.top - panY) / zoom
+        const p = { x: natX / NW, y: 0.75 - natY / NW }
+        setEditPts(pts => (pts ? pts.map((q, k) => (k === vi ? p : q)) : pts))
+        return
+      }
+
+      if (mode === 'text' && textDrag.current) {
+        const td = textDrag.current
+        const dx = (e.clientX - td.startX) / zoom / NW
+        const dy = -(e.clientY - td.startY) / zoom / NW
+        onUpdateText?.(td.ti, { x: td.origX + dx, y: td.origY + dy })
       }
     }
 
@@ -218,6 +253,20 @@ export default function Canvas({
         }
         dragState.current = null
         setDragOffset(null)
+        return
+      }
+
+      if (mode === 'vertex') {
+        vertexDrag.current = null
+        if (editPtsRef.current && editIdxRef.current !== null) {
+          onEditPoints?.(editIdxRef.current, editPtsRef.current)
+        }
+        setEditPts(null)
+        return
+      }
+
+      if (mode === 'text') {
+        textDrag.current = null
         return
       }
 
@@ -268,7 +317,21 @@ export default function Canvas({
     const frame = renderTurshowSim(shapes)
     // copy into a fresh buffer: ImageData's typing rejects ArrayBufferLike
     ctx.putImageData(new ImageData(new Uint8ClampedArray(frame.pixels), frame.width, frame.height), 0, 0)
-  }, [preview, shapes])
+    // font-text placement guide: real letterforms come from the viewer
+    // (TURSHOW's built-in font), so this monospace approximation is for
+    // position/size only — same caveat as the Text Placer.
+    for (const t of texts) {
+      const fontSize = (t.charH ?? 0.028) * (SIM_H / 0.75)
+      const charW = (t.charW ?? 0.0145) * SIM_W
+      const c = t.color ?? { r: 255, g: 255, b: 255 }
+      ctx.font = `${fontSize}px Courier, monospace`
+      ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`
+      try { (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${charW - 0.6 * fontSize}px` } catch { /* older engines */ }
+      t.lines.forEach((line, k) => {
+        ctx.fillText(line, t.x * SIM_W, (1 - (t.y - (k + 0.8) * (t.charH ?? 0.028)) / 0.75) * (SIM_H - 1))
+      })
+    }
+  }, [preview, shapes, texts])
 
   // screen coords → NAPLPS field coords
   const screenToField = useCallback((clientX: number, clientY: number) => {
@@ -325,6 +388,20 @@ export default function Canvas({
       return
     }
 
+    if (tool === 'text') {
+      const p = screenToField(e.clientX, e.clientY)
+      if (p && onAddText) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
+        onAddText({
+          lines: ['TEXT'],
+          x: p.x, y: p.y,
+          charW: 0.0145, charH: 0.028,
+          color: m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : { r: 255, g: 255, b: 255 },
+        })
+      }
+      return
+    }
+
     const target = e.target as SVGElement
     const idxStr = target.dataset.idx
     const shapeIdx = idxStr !== undefined ? Number(idxStr) : NaN
@@ -354,11 +431,40 @@ export default function Canvas({
       return
     }
 
-    // Clicked background → rubber band
+    // Clicked background → leave vertex mode, deselect, rubber band
+    setEditIdx(null)
+    onSelectText?.(null)
     if (!e.shiftKey) onSelect(new Set())
     pointerMode.current = 'rubber'
     setRubber({ sx: e.clientX, sy: e.clientY, ex: e.clientX, ey: e.clientY })
-  }, [spaceHeld, selectedIds, onSelect, shapes, tool, preview, screenToField])
+  }, [spaceHeld, selectedIds, onSelect, shapes, tool, preview, screenToField, drawColor, onAddText, onSelectText])
+
+  // Double-click: finish a line draft, or enter vertex-edit mode on a shape.
+  const onSvgDoubleClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (preview) return
+    if (tool === 'line') { commitDraft(); return }
+    if (tool !== 'select') return
+    const target = e.target as SVGElement
+    const idxStr = target.dataset.idx
+    const shapeIdx = idxStr !== undefined ? Number(idxStr) : NaN
+    if (!isNaN(shapeIdx)) {
+      setEditIdx(shapeIdx)
+      onSelect(new Set([shapeIdx]))
+    } else {
+      setEditIdx(null)
+    }
+  }, [preview, tool, commitDraft, onSelect])
+
+  // Vertex mode exits with the tool, the preview toggle, or Escape.
+  useEffect(() => { if (tool !== 'select' || preview) setEditIdx(null) }, [tool, preview])
+  useEffect(() => {
+    if (editIdx === null) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditIdx(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editIdx])
+  // Shape list changed under us (delete/merge/reorder) → drop vertex mode.
+  useEffect(() => { setEditIdx(null); setEditPts(null) }, [shapes.length])
 
   const { zoom, panX, panY } = tf
   const isDragging = dragOffset !== null
@@ -390,7 +496,7 @@ export default function Canvas({
         height="100%"
         style={{ display: 'block', position: 'absolute', inset: 0 }}
         onMouseDown={onSvgMouseDown}
-        onDoubleClick={tool === 'line' && !preview ? () => commitDraft() : undefined}
+        onDoubleClick={onSvgDoubleClick}
       >
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
           {!preview && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
@@ -451,6 +557,115 @@ export default function Canvas({
               />
             )
           })}
+
+          {/* font-text blocks */}
+          {!preview && texts.map((t, ti) => {
+            const fontSize = (t.charH ?? 0.028) * NW
+            const charW = (t.charW ?? 0.0145) * NW
+            const spacing = charW - 0.6 * fontSize
+            const maxLen = Math.max(1, ...t.lines.map(l => l.length))
+            const sel = selectedText === ti
+            const topY = (0.75 - t.y) * NW
+            const c = t.color ?? { r: 255, g: 255, b: 255 }
+            return (
+              <g
+                key={`t${ti}`}
+                style={{ cursor: 'move' }}
+                onMouseDown={e => {
+                  if (tool !== 'select' || spaceHeld) return
+                  e.stopPropagation()
+                  onSelectText?.(ti)
+                  onSelect(new Set())
+                  pointerMode.current = 'text'
+                  textDrag.current = { ti, startX: e.clientX, startY: e.clientY, origX: t.x, origY: t.y }
+                }}
+              >
+                <rect
+                  x={t.x * NW} y={topY}
+                  width={maxLen * charW} height={t.lines.length * fontSize}
+                  fill="transparent"
+                  stroke={sel ? '#0a84ff' : 'none'}
+                  strokeWidth={1.5 / zoom}
+                  strokeDasharray={sel ? `${4 / zoom} ${3 / zoom}` : undefined}
+                />
+                {t.lines.map((line, k) => (
+                  <text
+                    key={k}
+                    x={t.x * NW}
+                    y={topY + (k + 0.8) * fontSize}
+                    fontFamily="Courier, monospace"
+                    fontSize={fontSize}
+                    letterSpacing={spacing}
+                    fill={colorHex(c)}
+                    style={{ userSelect: 'none' }}
+                  >
+                    {line}
+                  </text>
+                ))}
+              </g>
+            )
+          })}
+
+          {/* vertex-edit handles */}
+          {!preview && editIdx !== null && shapes[editIdx] && (() => {
+            const shape = shapes[editIdx]
+            const pts = editPts ?? shape.points
+            const minPts = shape.type === 'polygon' ? 3 : 2
+            const handles: React.ReactNode[] = []
+            pts.forEach((p, vi) => {
+              const sp = toSvg(p)
+              const q = pts[(vi + 1) % pts.length]
+              const mid = toSvg({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 })
+              // midpoint inserter (skip the closing edge for open polylines)
+              if (shape.type === 'polygon' || vi < pts.length - 1) {
+                handles.push(
+                  <circle
+                    key={`m${vi}`} cx={mid.x} cy={mid.y} r={3 / zoom}
+                    fill="#111" stroke="#0a84ff" strokeWidth={1 / zoom}
+                    style={{ cursor: 'copy' }}
+                    onMouseDown={e => {
+                      e.stopPropagation()
+                      const next = [...pts]
+                      next.splice(vi + 1, 0, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 })
+                      setEditPts(next)
+                      vertexDrag.current = { vi: vi + 1 }
+                      pointerMode.current = 'vertex'
+                    }}
+                  />
+                )
+              }
+              handles.push(
+                <circle
+                  key={`v${vi}`} cx={sp.x} cy={sp.y} r={4.5 / zoom}
+                  fill="#0a84ff" stroke="#fff" strokeWidth={1 / zoom}
+                  style={{ cursor: 'grab' }}
+                  onMouseDown={e => {
+                    e.stopPropagation()
+                    if (e.altKey) {
+                      if (pts.length > minPts && onEditPoints) {
+                        onEditPoints(editIdx, pts.filter((_, k) => k !== vi))
+                      }
+                      return
+                    }
+                    setEditPts([...pts])
+                    vertexDrag.current = { vi }
+                    pointerMode.current = 'vertex'
+                  }}
+                />
+              )
+            })
+            return (
+              <g>
+                <polygon
+                  points={pointsStr(pts)}
+                  fill="none" stroke="#0a84ff"
+                  strokeWidth={1 / zoom} strokeDasharray={`${3 / zoom} ${2 / zoom}`}
+                  pointerEvents="none"
+                />
+                {handles}
+              </g>
+            )
+          })()}
 
           {/* line-tool draft */}
           {draft.length > 0 && (

@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { dpSimplify } from '@lib/regionTrace'
 import type { NapShape } from '@lib/naplps-std-decoder'
+import type { NapText } from '@lib/naplps-std-encoder'
 
 // Simplify tolerance is shown in "pixels" of a 640px-wide display; shape
 // coordinates are 0..1 field units.
@@ -33,10 +34,16 @@ interface Props {
   onSimplify: (tolerance: number) => void
   onConvertToLines: () => void
   onReorder: (where: 'back' | 'front' | 'down' | 'up') => void
+  texts: NapText[]
+  selectedText: number | null
+  onSelectText: (i: number | null) => void
+  onUpdateText: (i: number, patch: Partial<NapText>) => void
+  onDeleteText: (i: number) => void
 }
 
 export default function ColorPanel({
   shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify, onConvertToLines, onReorder,
+  texts, selectedText, onSelectText, onUpdateText, onDeleteText,
 }: Props) {
   const [recolorHex, setRecolorHex] = useState('#ffffff')
   const [simplifyPx, setSimplifyPx] = useState(1)
@@ -202,6 +209,71 @@ export default function ColorPanel({
               Apply
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Font-text blocks */}
+      {texts.length > 0 && (
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+            Text blocks ({texts.length})
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+            {texts.map((t, i) => (
+              <button
+                key={i}
+                onClick={() => onSelectText(selectedText === i ? null : i)}
+                style={{
+                  fontSize: 10, padding: '2px 8px', maxWidth: 120,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  background: selectedText === i ? 'var(--accent)' : undefined,
+                  color: selectedText === i ? '#fff' : undefined,
+                }}
+              >
+                {t.lines[0] || '(empty)'}
+              </button>
+            ))}
+          </div>
+          {selectedText !== null && texts[selectedText] && (() => {
+            const t = texts[selectedText]
+            const hx = (c?: { r: number; g: number; b: number }) => hexColor(c ?? { r: 255, g: 255, b: 255 })
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <textarea
+                  value={t.lines.join('\n')}
+                  onChange={e => onUpdateText(selectedText, { lines: e.target.value.split('\n') })}
+                  rows={Math.min(6, Math.max(2, t.lines.length))}
+                  style={{ fontSize: 11, fontFamily: 'monospace', resize: 'vertical', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: 4 }}
+                />
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                  W
+                  <input
+                    type="range" min={0.008} max={0.04} step={0.0005}
+                    value={t.charW ?? 0.0145}
+                    onChange={e => onUpdateText(selectedText, { charW: Number(e.target.value) })}
+                    style={{ flex: 1 }}
+                  />
+                  H
+                  <input
+                    type="range" min={0.014} max={0.07} step={0.001}
+                    value={t.charH ?? 0.028}
+                    onChange={e => onUpdateText(selectedText, { charH: Number(e.target.value) })}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="color"
+                    value={hx(t.color)}
+                    onChange={e => {
+                      const m = hexToRgb(e.target.value)
+                      if (m) onUpdateText(selectedText, { color: m })
+                    }}
+                    style={{ width: 24, height: 20, padding: 1 }}
+                  />
+                  <button className="danger" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => onDeleteText(selectedText)}>✕</button>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 

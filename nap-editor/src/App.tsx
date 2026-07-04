@@ -2,13 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Canvas, { type CanvasHandle } from './components/Canvas'
 import ColorPanel from './components/ColorPanel'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
-import { encodeNaplpsStandard } from '@lib/naplps-std-encoder'
+import { encodeNaplpsStandard, type NapText } from '@lib/naplps-std-encoder'
 import { dpSimplify, simplifyForHardware } from '@lib/regionTrace'
 import { lintShapes, splitPolygonForHardware } from '@lib/turshowSim'
 import polygonClipping from 'polygon-clipping'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
-export type Tool = 'select' | 'line'
+export type Tool = 'select' | 'line' | 'text'
 
 function fmtBytes(n: number) {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`
@@ -72,6 +72,11 @@ export default function App() {
   const [tool, setTool] = useState<Tool>('select')
   const [preview, setPreview] = useState(false)
   const [drawColor, setDrawColor] = useState('#ff4040')
+  // NAPLPS font-text blocks (encoded as TEXT/FIELD commands on save; the
+  // viewer supplies the letterforms). Authored fresh — the decoder does not
+  // yet reconstruct TEXT blocks from existing files.
+  const [texts, setTexts] = useState<NapText[]>([])
+  const [selectedText, setSelectedText] = useState<number | null>(null)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [fileName, setFileName] = useState('Untitled')
   const [dirty, setDirty] = useState(false)
@@ -118,21 +123,26 @@ export default function App() {
       const bytes = new Uint8Array(result.data)
       const decoded = decodeNaplpsStandard(bytes)
       setShapes(decoded.shapes)
+      setTexts([])
+      setSelectedText(null)
       setHistory([])
       setFuture([])
       setSelectedIds(new Set())
       setFilePath(result.path)
       setFileName(result.path.split('/').pop() ?? result.path)
       setDirty(false)
+      if ((decoded.commandCounts['TEXT'] ?? 0) > 0) {
+        alert('This file contains NAPLPS TEXT blocks. The editor cannot re-edit existing text yet — the graphics load fine, but the original text commands will be dropped if you save over them.')
+      }
     } catch (e) {
       alert(`Failed to decode: ${e instanceof Error ? e.message : String(e)}`)
     }
   }, [])
 
   const getBytes = useCallback((): number[] => {
-    const { bytes } = encodeNaplpsStandard(shapes)
+    const { bytes } = encodeNaplpsStandard(shapes, { texts })
     return Array.from(bytes)
-  }, [shapes])
+  }, [shapes, texts])
 
   const saveFile = useCallback(async () => {
     if (!window.api) return
@@ -187,9 +197,31 @@ export default function App() {
 
   // Live encoded size; period viewers display at ~13k baud so bytes = seconds.
   const napSize = useMemo(() => {
-    if (!shapes.length) return 0
-    try { return encodeNaplpsStandard(shapes).bytes.length } catch { return 0 }
-  }, [shapes])
+    if (!shapes.length && !texts.length) return 0
+    try { return encodeNaplpsStandard(shapes, { texts }).bytes.length } catch { return 0 }
+  }, [shapes, texts])
+
+  // ── vertex + text editing ────────────────────────────────────────────────
+  const editShapePoints = useCallback((i: number, points: NapShape['points']) => {
+    setShapes(prev => { pushHistory(prev); return prev.map((s, j) => (j === i ? { ...s, points } : s)) })
+  }, [pushHistory])
+
+  const addText = useCallback((t: NapText) => {
+    setTexts(prev => [...prev, t])
+    setSelectedText(texts.length)
+    setDirty(true)
+  }, [texts.length])
+
+  const updateText = useCallback((i: number, patch: Partial<NapText>) => {
+    setTexts(prev => prev.map((t, j) => (j === i ? { ...t, ...patch } : t)))
+    setDirty(true)
+  }, [])
+
+  const deleteText = useCallback((i: number) => {
+    setTexts(prev => prev.filter((_, j) => j !== i))
+    setSelectedText(null)
+    setDirty(true)
+  }, [])
 
   // Draw order: later in the array = drawn later = on top.
   const reorderSelected = useCallback((where: 'back' | 'front' | 'down' | 'up') => {
@@ -255,6 +287,9 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // don't hijack typing in inputs/textareas (text panel, sliders, colors)
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       const meta = e.metaKey || e.ctrlKey
       if ((e.key === 'Delete' || e.key === 'Backspace') && !meta) { e.preventDefault(); deleteSelected(); return }
       if (e.key === 'z' && meta && !e.shiftKey) { e.preventDefault(); undo(); return }
@@ -263,6 +298,7 @@ export default function App() {
       if (e.key === 'Escape') { setSelectedIds(new Set()); return }
       if (e.key === 'v' && !meta) { setTool('select'); return }
       if (e.key === 'l' && !meta) { setTool('line'); return }
+      if (e.key === 't' && !meta) { setTool('text'); return }
       if (e.key === 'p' && !meta) { setPreview(p => !p); return }
       if (e.key === 'm' && meta) { e.preventDefault(); mergeSelected(); return }
       if (e.key === '=' && meta) { e.preventDefault(); canvasHandle.current?.zoomIn(); return }
@@ -337,12 +373,18 @@ export default function App() {
             onClick={() => setTool('line')}
             style={tool === 'line' ? { background: 'var(--accent)', color: '#fff' } : undefined}
           >╱</button>
-          {tool === 'line' && (
+          <button
+            className="icon-btn"
+            title="Text tool (T) — click to place a NAPLPS font-text block. The viewer supplies the letterforms."
+            onClick={() => setTool('text')}
+            style={tool === 'text' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >T</button>
+          {(tool === 'line' || tool === 'text') && (
             <input
               type="color"
               value={drawColor}
               onChange={e => setDrawColor(e.target.value)}
-              title="Line colour"
+              title="Draw colour"
               style={{ width: 26, height: 24, padding: 1, alignSelf: 'center' }}
             />
           )}
@@ -394,6 +436,12 @@ export default function App() {
               preview={preview}
               drawColor={drawColor}
               onAddShape={addShape}
+              onEditPoints={editShapePoints}
+              texts={texts}
+              selectedText={selectedText}
+              onSelectText={setSelectedText}
+              onAddText={addText}
+              onUpdateText={updateText}
             />
             <ColorPanel
               shapes={shapes}
@@ -406,6 +454,11 @@ export default function App() {
               onSimplify={simplifySelected}
               onConvertToLines={convertSelectedToLines}
               onReorder={reorderSelected}
+              texts={texts}
+              selectedText={selectedText}
+              onSelectText={setSelectedText}
+              onUpdateText={updateText}
+              onDeleteText={deleteText}
             />
           </>
         )}
