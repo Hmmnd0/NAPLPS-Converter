@@ -1,0 +1,13 @@
+# Netlify build config for the NAPLPS Converter (Next.js 15).
+# The Netlify Next.js runtime is auto-installed for Next projects; this file
+# just pins the basics so UI and CLI deploys behave identically.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+  # Skip site rebuilds when only the Electron nap-editor changed
+  # (exit 0 = skip). The editor shares this repo but is not part of the site.
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ':(exclude)nap-editor'"
+
+[build.environment]
+  NODE_VERSION = "20"
