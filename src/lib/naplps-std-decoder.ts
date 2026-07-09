@@ -218,62 +218,90 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
     }
     if (!COORD_OPS.has(b) || ops.length === 0) continue;
 
-    // decode operand groups into raw coordinates, then resolve abs/relative
+    // decode operand bytes into raw coordinate groups
     const raws: NapPoint[] = [];
     for (let k = 0; k + mvl < ops.length || (k < ops.length && raws.length === 0); k += mvl + 1) {
       raws.push(getnum(ops.slice(k, k + mvl + 1), mvl));
     }
-    const pts: NapPoint[] = [];
-    const relFirst = REL_FIRST.has(b);
-    for (let k = 0; k < raws.length; k++) {
-      if (k === 0) pts.push(relFirst ? { x: cur.x + raws[0].x, y: cur.y + raws[0].y } : raws[0]);
-      else pts.push({ x: pts[k - 1].x + raws[k].x, y: pts[k - 1].y + raws[k].y });
-    }
-    if (pts.length === 0) continue;
+    if (raws.length === 0) continue;
 
-    if (PTSET_OPS.has(b)) {
-      cur = pts[pts.length - 1]; // move only
-    } else if (POINT_OPS.has(b)) {
-      shapes.push({ type: 'point', points: [pts[0]], color: curColor, filled: true });
-      cur = pts[pts.length - 1];
-    } else if (LINE_OPS.has(b)) {
-      // SET& variants (0x2a, 0x2b) provide an explicit start — don't prepend cur.
-      // Plain variants (0x28, 0x29) start from the current point — prepend cur.
-      const setLine = b === 0x2a || b === 0x2b;
-      shapes.push({ type: 'polyline', points: setLine ? pts : [cur, ...pts], color: curColor, filled: false });
-      cur = pts[pts.length - 1];
-    } else if (ARC_OPS.has(b)) {
-      // SET variants carry the points directly; plain arcs start from the current point.
-      // RHINO sp3arc: 3 points → arc through them; 2 points → full circle with the two
-      // points as diameter endpoints (sp3arc(p0,p1,p0)). The eagle's eye is a 2-point arc.
-      const setArc = b === 0x2e || b === 0x2f;
-      const a = setArc ? pts : [cur, ...pts];
-      let sampled: NapPoint[] | null = null;
-      if (a.length === 2) {
-        const cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2;
-        const r = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) / 2;
-        sampled = [];
-        for (let k = 0; k <= 24; k++) { const t = (2 * Math.PI * k) / 24; sampled.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) }); }
-      } else if (a.length >= 3) {
-        sampled = sampleArc(a[0], a[1], a[2]);
+    // Per-family group semantics, matched to RHINO PDISET.C (validated against
+    // pheller/NAPLPS's 246-file historical corpus — the old "first absolute,
+    // rest relative for everything" heuristic starburst-garbled LINE-ABS-heavy
+    // files):
+    //   PT-SET/POINT/LINE ABS: every group absolute.
+    //   PT-SET/POINT/LINE REL: every group a delta from the running point.
+    //   SET&LINE-ABS:  independent PAIRS (start abs, end abs) — not a chain.
+    //   SET&LINE-REL:  independent PAIRS (start abs, delta).
+    //   ARC/POLY plain: relative chain from the current point.
+    //   SET&ARC/SET&POLY: first group absolute, then relative chain.
+    //   RECT plain:    each group is a (w,h) delta; only X advances after.
+    //   SET&RECT:      PAIRS (corner abs, (w,h) delta); only X advances.
+    const rel = REL_FIRST.has(b);
+
+    if (PTSET_OPS.has(b) || POINT_OPS.has(b)) {
+      for (const g of raws) {
+        cur = rel ? { x: cur.x + g.x, y: cur.y + g.y } : g;
+        if (POINT_OPS.has(b)) shapes.push({ type: 'point', points: [cur], color: curColor, filled: true });
       }
-      if (sampled) {
-        shapes.push({ type: FILLED.has(b) ? 'polygon' : 'polyline', points: sampled, color: curColor, filled: FILLED.has(b) });
-      } else if (pts.length > 0) {
-        shapes.push({ type: 'polyline', points: [cur, ...pts], color: curColor, filled: false });
+    } else if (b === 0x28 || b === 0x29) { // LINE-ABS / LINE-REL: chain from cur
+      const pts: NapPoint[] = [cur];
+      for (const g of raws) {
+        cur = rel ? { x: cur.x + g.x, y: cur.y + g.y } : g;
+        pts.push(cur);
       }
-      if (pts.length > 0) cur = pts[pts.length - 1];
-    } else if (POLY_OPS.has(b)) {
-      shapes.push({ type: 'polygon', points: pts, color: curColor, filled: FILLED.has(b) });
-      cur = pts[pts.length - 1];
-    } else if (RECT_OPS.has(b) && pts.length >= 2) {
-      const [p, q] = pts;
-      shapes.push({
-        type: 'polygon',
-        points: [{ x: p.x, y: p.y }, { x: q.x, y: p.y }, { x: q.x, y: q.y }, { x: p.x, y: q.y }],
-        color: curColor, filled: FILLED.has(b),
+      shapes.push({ type: 'polyline', points: pts, color: curColor, filled: false });
+    } else if (b === 0x2a || b === 0x2b) { // SET&LINE: independent pairs
+      for (let k = 0; k + 1 < raws.length; k += 2) {
+        const a = raws[k];
+        const e = b === 0x2a ? raws[k + 1] : { x: a.x + raws[k + 1].x, y: a.y + raws[k + 1].y };
+        shapes.push({ type: 'polyline', points: [a, e], color: curColor, filled: false });
+        cur = e;
+      }
+    } else if (ARC_OPS.has(b) || POLY_OPS.has(b)) {
+      // plain: relative chain from cur; SET&: first abs, then relative chain
+      const set = b === 0x2e || b === 0x2f || b === 0x36 || b === 0x37;
+      const pts: NapPoint[] = [];
+      raws.forEach((g, k) => {
+        if (set && k === 0) cur = g;
+        else cur = { x: cur.x + g.x, y: cur.y + g.y };
+        pts.push(cur);
       });
-      cur = q;
+      const a = set ? pts : [ { x: pts[0].x - raws[0].x, y: pts[0].y - raws[0].y }, ...pts ];
+      if (POLY_OPS.has(b)) {
+        shapes.push({ type: 'polygon', points: a, color: curColor, filled: FILLED.has(b) });
+      } else {
+        // RHINO sp3arc: 3 points → arc through them; 2 points → full circle
+        // with the two points as diameter endpoints. The eagle's eye is one.
+        let sampled: NapPoint[] | null = null;
+        if (a.length === 2) {
+          const cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2;
+          const r = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) / 2;
+          sampled = [];
+          for (let k = 0; k <= 24; k++) { const t = (2 * Math.PI * k) / 24; sampled.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) }); }
+        } else if (a.length >= 3) {
+          sampled = sampleArc(a[0], a[1], a[2]);
+        }
+        if (sampled) {
+          shapes.push({ type: FILLED.has(b) ? 'polygon' : 'polyline', points: sampled, color: curColor, filled: FILLED.has(b) });
+        } else {
+          shapes.push({ type: 'polyline', points: a, color: curColor, filled: false });
+        }
+      }
+    } else if (RECT_OPS.has(b)) {
+      const set = b === 0x32 || b === 0x33;
+      const step = set ? 2 : 1;
+      for (let k = 0; k + step - 1 < raws.length; k += step) {
+        const p = set ? raws[k] : cur;
+        const d = set ? raws[k + 1] : raws[k];
+        const q = { x: p.x + d.x, y: p.y + d.y };
+        shapes.push({
+          type: 'polygon',
+          points: [{ x: p.x, y: p.y }, { x: q.x, y: p.y }, { x: q.x, y: q.y }, { x: p.x, y: q.y }],
+          color: curColor, filled: FILLED.has(b),
+        });
+        cur = { x: q.x, y: p.y }; // only X advances (RHINO rectl/srectl)
+      }
     }
   }
 
