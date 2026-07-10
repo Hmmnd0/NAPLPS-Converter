@@ -109,6 +109,28 @@ dashed/hollow — at any pel, chained or as separate commands. Consequences:
   is always solid, and with pel 0 the fill's outline no longer inflates, so a
   1-2px filled stroke renders at true width.
 
+## 9. Fills are edge-inclusive: every shape renders one pixel wider
+
+Measured from raw DOSBox-X framebuffer captures (bypassing window scaling):
+2px-wide strips render 3px, 1px strips render 2px — identically for
+SET&RECT-FILLED and SET&POLY-FILLED (verified side by side; RECT is if
+anything more uniform). TURSHOW fills the span [x0..x1] inclusive at both
+edges, inflating every filled shape ~1px per axis.
+
+Consequences:
+- **Fine hatching bleeds in the vector route**: at 2px-strip/2px-gap pitch,
+  the +1px inflation halves the gaps and adjacent strips touch at some
+  positions. No encoding fixes this; it is the fill convention. Keep vector
+  hatch pitch ≥ strip+2px, or use the raster route.
+- **Raster row-run tiling cancels the inflation**: consecutive runs on a row
+  overwrite their neighbour's inflated edge, so 1:1 raster conversions render
+  at true width. This (not just resolution) is why the raster/hybrid route is
+  the fidelity route for fine detail.
+- Judge thin features from **raw captures** (DOSBox-X Capture menu →
+  Screenshot, saved to ~/Library/Preferences/capture/) or a much-enlarged
+  window — default-size macOS window scaling adds misleading moiré on 1-3px
+  features.
+
 ## Route comparison (MadMaze end screen, 636×331)
 
 | Route | Shapes | Size | TURSHOW time | Fidelity |
