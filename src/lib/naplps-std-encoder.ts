@@ -41,6 +41,7 @@ const OP = {
   SELECT_COLOR: 0x3e,
   SET_COLOR: 0x3c,
   SET_POLY_FILLED: 0x37,
+  SET_RECT_FILLED: 0x33,
   PT_SET_ABS: 0x24,
   LINE_REL: 0x29,
   SET_LINE_ABS: 0x2a,
@@ -117,6 +118,30 @@ function emitTo(out: number[], q: [number, number], tx: number, ty: number) {
 function emitRelPath(out: number[], pts: NapPoint[], start: [number, number]) {
   const q: [number, number] = [start[0], start[1]];
   for (let k = 1; k < pts.length; k++) emitTo(out, q, quant(pts[k].x), quant(pts[k].y));
+}
+
+// If a filled polygon is an axis-aligned rectangle (4 corners, or 5 with the
+// first repeated to close), return its quantized bounds — else null. These
+// encode as SET&RECT-FILLED (corner + w,h delta ≈ 9 bytes) instead of
+// SET&POLY-FILLED (4 vertices ≈ 17 bytes): raster-mode 1:1 conversions are
+// almost entirely rects, so this nearly halves them (bytes = display seconds
+// on baud-paced viewers).
+function asRect(pts: NapPoint[]): { x0: number; y0: number; w: number; h: number } | null {
+  let n = pts.length;
+  if (n === 5 && pts[4].x === pts[0].x && pts[4].y === pts[0].y) n = 4;
+  if (n !== 4) return null;
+  const q = pts.slice(0, 4).map(p => ({ x: quant(p.x), y: quant(p.y) }));
+  const xs = new Set(q.map(p => p.x)), ys = new Set(q.map(p => p.y));
+  if (xs.size !== 2 || ys.size !== 2) return null;
+  // each corner of the bounds must appear exactly once
+  const [xa, xb] = [...xs], [ya, yb] = [...ys];
+  const seen = new Set(q.map(p => `${p.x},${p.y}`));
+  if (seen.size !== 4) return null;
+  const x0 = Math.min(xa, xb), y0 = Math.min(ya, yb);
+  const w = Math.abs(xb - xa), h = Math.abs(yb - ya);
+  // stay clear of the ±ONE sign-wrap ambiguity on the (w,h) delta
+  if (w === 0 || h === 0 || w > SAFE || h > SAFE) return null;
+  return { x0: Math.max(0, x0), y0: Math.max(0, y0), w, h };
 }
 
 // A block of NAPLPS font text, drawn with the TEXT/FIELD/SI mechanism (the
@@ -221,9 +246,16 @@ export function encodeNaplpsStandard(shapes: NapShape[], opts: EncodeOptions = {
     if (slot !== curSlot) { out.push(OP.SELECT_COLOR); emitIndex(out, slot); curSlot = slot; }
 
     if (s.type === 'polygon' && s.filled && s.points.length >= 3) {
-      out.push(OP.SET_POLY_FILLED);
-      const start = emitAbs(out, s.points[0]);
-      emitRelPath(out, s.points, start);
+      const rect = asRect(s.points);
+      if (rect) {
+        out.push(OP.SET_RECT_FILLED);
+        emitCoord(out, rect.x0, rect.y0);
+        emitCoord(out, rect.w, rect.h);
+      } else {
+        out.push(OP.SET_POLY_FILLED);
+        const start = emitAbs(out, s.points[0]);
+        emitRelPath(out, s.points, start);
+      }
     } else if (s.type === 'point' || s.points.length === 1) {
       // a single vertex (incl. degenerate 1-point polygons) → a point.
       out.push(OP.POINT_ABS);

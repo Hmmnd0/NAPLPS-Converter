@@ -20,7 +20,9 @@ describe('svgToNaplpsStandard — SVG (traced PNG) → real .nap', () => {
     expect(bytes.length).toBeGreaterThan(20);
 
     const { shapes, commandCounts } = decodeNaplpsStandard(bytes);
-    expect(commandCounts['SET&POLY-FILLED']).toBe(2);
+    // axis-aligned rects take the compact SET&RECT-FILLED encoding (9 bytes
+    // vs 17 for SET&POLY-FILLED)
+    expect(commandCounts['SET&RECT-FILLED']).toBe(2);
     expect(commandCounts['SELECT-COLOR']).toBeGreaterThanOrEqual(2);
 
     const fills = shapes.filter(s => s.type === 'polygon' && s.filled);

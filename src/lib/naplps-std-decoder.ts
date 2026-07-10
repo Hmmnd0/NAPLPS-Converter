@@ -354,9 +354,13 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
         const p = set ? raws[k] : cur;
         const d = set ? raws[k + 1] : raws[k];
         const q = { x: p.x + d.x, y: p.y + d.y };
+        // canonical corner order (min corner first) regardless of delta signs,
+        // so encode→decode→encode is stable for rects from any source
+        const x0 = Math.min(p.x, q.x), x1 = Math.max(p.x, q.x);
+        const y0 = Math.min(p.y, q.y), y1 = Math.max(p.y, q.y);
         shapes.push({
           type: 'polygon',
-          points: [{ x: p.x, y: p.y }, { x: q.x, y: p.y }, { x: q.x, y: q.y }, { x: p.x, y: q.y }],
+          points: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
           color: curColor, filled: FILLED.has(b),
         });
         cur = { x: q.x, y: p.y }; // only X advances (RHINO rectl/srectl)
