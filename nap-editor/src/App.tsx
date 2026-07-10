@@ -123,7 +123,7 @@ export default function App() {
       const bytes = new Uint8Array(result.data)
       const decoded = decodeNaplpsStandard(bytes)
       setShapes(decoded.shapes)
-      setTexts([])
+      setTexts(decoded.texts)
       setSelectedText(null)
       setHistory([])
       setFuture([])
@@ -131,9 +131,6 @@ export default function App() {
       setFilePath(result.path)
       setFileName(result.path.split('/').pop() ?? result.path)
       setDirty(false)
-      if ((decoded.commandCounts['TEXT'] ?? 0) > 0) {
-        alert('This file contains NAPLPS TEXT blocks. The editor cannot re-edit existing text yet — the graphics load fine, but the original text commands will be dropped if you save over them.')
-      }
     } catch (e) {
       alert(`Failed to decode: ${e instanceof Error ? e.message : String(e)}`)
     }

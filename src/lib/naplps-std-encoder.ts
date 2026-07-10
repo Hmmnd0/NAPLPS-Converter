@@ -11,7 +11,7 @@
 //  - getadr (svl=1): colour index i → byte0 = idx<<2, byte1 = 0 (low bits unused).
 //  - SET-COLOR: GRB, 2 bits per channel per byte; byte i carries channel bits
 //    (7-2i, 6-2i). With mvl=3 all 8 bits of each 0..255 channel are encoded.
-import { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
+import type { NapShape, NapColor, NapPoint } from './naplps-std-decoder';
 
 const ONE = 8192;
 const MVL = 3;                 // 4 bytes per coordinate
@@ -120,14 +120,10 @@ function emitRelPath(out: number[], pts: NapPoint[], start: [number, number]) {
 }
 
 // A block of NAPLPS font text, drawn with the TEXT/FIELD/SI mechanism (the
-// authentic crisp-font path) rather than as traced polygons.
-export interface NapText {
-  lines: string[];          // text lines, drawn top → bottom
-  x: number; y: number;     // top-left of the block, normalized NAPLPS coords (Y up)
-  charW?: number;           // character cell width  (normalized), default 0.018
-  charH?: number;           // character cell height (normalized), default 0.030
-  color?: NapColor;         // default white
-}
+// authentic crisp-font path) rather than as traced polygons. The type lives
+// in the decoder (shared types); re-exported here for existing importers.
+export type { NapText } from './naplps-std-decoder';
+import type { NapText } from './naplps-std-decoder';
 
 const DEFAULT_TEXT_COLOR: NapColor = { r: 255, g: 255, b: 255 };
 

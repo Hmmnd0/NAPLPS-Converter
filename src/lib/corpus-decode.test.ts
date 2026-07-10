@@ -75,3 +75,30 @@ describe('period-file decoding (pheller corpus)', () => {
     expect(lines[1].points[0].x).toBeCloseTo(0.7, 1);
   });
 });
+
+describe('structural TEXT decoding', () => {
+  it('round-trips font text through encode → decode', async () => {
+    const { encodeNaplpsStandard } = await import('./naplps-std-encoder');
+    const texts = [
+      { lines: ['Title Line'], x: 0.13, y: 0.59, charW: 0.021, charH: 0.036, color: { r: 0, g: 0, b: 0 } },
+      { lines: ['Body one.', '', 'Body two.'], x: 0.15, y: 0.5, charW: 0.0145, charH: 0.028, color: { r: 255, g: 255, b: 255 } },
+    ];
+    const { bytes } = encodeNaplpsStandard([], { texts });
+    const dec = decodeNaplpsStandard(bytes);
+    expect(dec.texts.length).toBe(2);
+    expect(dec.texts[0].lines).toEqual(['Title Line']);
+    expect(dec.texts[1].lines).toEqual(['Body one.', '', 'Body two.']);
+    expect(dec.texts[0].x).toBeCloseTo(0.13, 2);
+    expect(dec.texts[0].y).toBeCloseTo(0.59, 2);
+    expect(dec.texts[0].charH!).toBeCloseTo(0.036, 2);
+    expect(dec.texts[1].color).toEqual({ r: 255, g: 255, b: 255 });
+  });
+
+  it('reads text blocks from a genuine period file (memra3.nap)', () => {
+    const dec = load('memra3.nap');
+    expect(dec.texts.length).toBeGreaterThanOrEqual(4);
+    const all = dec.texts.flatMap(t => t.lines).join('\n');
+    expect(all).toContain('Memra Software');
+    expect(all).toContain('Long live NAPLPS!');
+  });
+});

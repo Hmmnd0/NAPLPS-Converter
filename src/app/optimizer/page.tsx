@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "@/components/AppHeader";
-import { decodeNaplpsStandard, type NapShape, type NapColor, type NapPoint } from "@/lib/naplps-std-decoder";
+import { decodeNaplpsStandard, type NapShape, type NapColor, type NapPoint, type NapText } from "@/lib/naplps-std-decoder";
 import { encodeNaplpsStandard } from "@/lib/naplps-std-encoder";
 import { rasterizeNaplps } from "@/lib/naplpsRaster";
 import { traceMaskToPolygons } from "@/lib/regionTrace";
@@ -87,6 +87,7 @@ const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)}
 export default function Optimizer() {
   const [fileName, setFileName] = useState("");
   const [original, setOriginal] = useState<NapShape[]>([]);
+  const [texts, setTexts] = useState<NapText[]>([]);
   const [shapes, setShapes] = useState<NapShape[]>([]);
   const [commandCounts, setCommandCounts] = useState<Record<string, number> | null>(null);
   const [resolution, setResolution] = useState(256);
@@ -190,9 +191,9 @@ export default function Optimizer() {
     reader.onload = (ev) => {
       try {
         const bytes = new Uint8Array(ev.target?.result as ArrayBuffer);
-        const { shapes: decoded, commandCounts } = decodeNaplpsStandard(bytes);
-        if (decoded.length === 0) { setError("No drawable shapes decoded — text-only or unsupported frame."); return; }
-        setOriginal(decoded); setShapes(decoded); setCommandCounts(commandCounts);
+        const { shapes: decoded, texts: decodedTexts, commandCounts } = decodeNaplpsStandard(bytes);
+        if (decoded.length === 0 && decodedTexts.length === 0) { setError("No drawable shapes decoded — unsupported frame."); return; }
+        setOriginal(decoded); setShapes(decoded); setTexts(decodedTexts); setCommandCounts(commandCounts);
       } catch (err) {
         setError("Decode failed: " + (err instanceof Error ? err.message : String(err)));
       }
@@ -256,7 +257,8 @@ export default function Optimizer() {
 
   const download = () => {
     try {
-      const bytes = encodeNaplpsStandard(preview).bytes;
+      // texts pass through untouched — the optimizer edits shapes only
+      const bytes = encodeNaplpsStandard(preview, { texts }).bytes;
       const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

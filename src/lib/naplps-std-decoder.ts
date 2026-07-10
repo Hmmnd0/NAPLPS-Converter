@@ -24,9 +24,22 @@ export interface NapShape {
   color: NapColor;
   filled: boolean;
 }
+// A font-text block: the WORDS travel in the file; the viewer supplies the
+// letterforms. Defined here (with the other shared types) — the encoder
+// re-exports it for its callers.
+export interface NapText {
+  lines: string[];          // text lines, drawn top → bottom
+  x: number; y: number;     // top-left of the block, normalized NAPLPS coords (Y up)
+  charW?: number;           // character cell width  (normalized), default 0.018
+  charH?: number;           // character cell height (normalized), default 0.030
+  color?: NapColor;         // default white
+}
+
 export interface NapDecodeResult {
   shapes: NapShape[];
   palette: NapColor[];
+  /** font-text blocks (TEXT/FIELD + SI character runs), structurally decoded */
+  texts: NapText[];
   /** opcode usage histogram, name → count */
   commandCounts: Record<string, number>;
   /** bytes that decoded into geometry vs total */
@@ -180,6 +193,7 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
     bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)
   );
   const shapes: NapShape[] = [];
+  const texts: NapText[] = [];
   const palette: NapColor[] = DEFAULT_PALETTE.map(c => ({ ...c }));
   const commandCounts: Record<string, number> = {};
 
@@ -189,12 +203,42 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
   let curColor: NapColor = { r: 255, g: 255, b: 255 };
   let curSlot = 0;
 
+  // TEXT/FIELD state for structural text decoding. charW/H come from the TEXT
+  // command's trailing coordinate; the block position comes from the last
+  // FIELD origin (or, without a FIELD, the current drawing point).
+  let charW = 0.018, charH = 0.030;
+  let fieldOrigin: NapPoint | null = null;
+  let textLines: string[] = [];
+  let textLine = '';
+  const flushText = () => {
+    if (textLine.length) { textLines.push(textLine); textLine = ''; }
+    // trim trailing blank lines (APD runs used for cursor moves, not content)
+    while (textLines.length && textLines[textLines.length - 1] === '') textLines.pop();
+    if (textLines.some(l => l.trim().length)) {
+      const origin = fieldOrigin ?? cur;
+      texts.push({
+        lines: textLines,
+        x: origin.x,
+        y: origin.y,
+        charW, charH,
+        color: { ...curColor },
+      });
+    }
+    textLines = [];
+  };
+
   let i = 0;
   while (i < buf.length) {
     const b = buf[i++];
-    if (b === 0x0e) { mode = 'G'; continue; } // SO → graphics
+    if (b === 0x0e) { if (mode === 'T') flushText(); mode = 'G'; continue; } // SO → graphics
     if (b === 0x0f) { mode = 'T'; continue; } // SI → text
-    if (mode === 'T') continue;
+    if (mode === 'T') {
+      // character layer: printable ASCII accumulates; APD (LF) ends a line;
+      // CR alone is a column reset (our encoder always pairs CR+APD).
+      if (b >= 0x20 && b <= 0x7e) textLine += String.fromCharCode(b);
+      else if (b === 0x0a) { textLines.push(textLine); textLine = ''; }
+      continue;
+    }
     if (b < 0x20 || b > 0x3f) continue; // control/stray
 
     // collect operand bytes
@@ -204,6 +248,21 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
 
     if (b === 0x21) { // DOMAIN
       if (ops.length) { const c = data6(ops[0]); mvl = (c >> 2) & 7; svl = c & 3; }
+      continue;
+    }
+    if (b === 0x22) { // TEXT: 2 attribute bytes, then the character cell size
+      if (ops.length >= 2 + mvl + 1) {
+        const size = getnum(ops.slice(2, 2 + mvl + 1), mvl);
+        if (Math.abs(size.x) > 1e-4) charW = Math.abs(size.x);
+        if (Math.abs(size.y) > 1e-4) charH = Math.abs(size.y);
+      }
+      continue;
+    }
+    if (b === 0x38) { // FIELD: origin coord + extent coord — origin is the block's top-left
+      if (ops.length >= mvl + 1) {
+        fieldOrigin = getnum(ops.slice(0, mvl + 1), mvl);
+        cur = fieldOrigin;
+      }
       continue;
     }
     if (b === 0x3c) { // SET-COLOR → define current palette slot
@@ -305,5 +364,7 @@ export function decodeNaplpsStandard(bytes: Uint8Array | number[]): NapDecodeRes
     }
   }
 
-  return { shapes, palette, commandCounts, byteCount: buf.length };
+  if (mode === 'T') flushText(); // file ended inside a text run
+
+  return { shapes, texts, palette, commandCounts, byteCount: buf.length };
 }
