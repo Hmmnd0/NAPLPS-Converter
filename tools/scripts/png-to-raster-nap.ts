@@ -49,13 +49,25 @@ const output = process.argv[3] ?? '/tmp/turshow/END1R.NAP';
   const yOff = Math.round((m + (boxH - height * s) / 2) * GRID) / GRID;
   const norm = (px: number, py: number) => ({ x: xOff + px * s, y: yOff + (height - py) * s });
 
-  const shapes: NapShape[] = rects.map(r => {
+  // Lossless size reductions (pixel-identical output):
+  //  - skip near-black rects: the viewer background is already black
+  //  - sort by colour: raster tiles are disjoint, so draw order cannot change
+  //    any pixel, and grouping colours collapses ~2000 SELECT-COLOR commands
+  //    into one per palette slot (~3 bytes each)
+  const kept = rects.filter(r => {
+    const c = palette[r.ci];
+    return !(c[0] < 8 && c[1] < 8 && c[2] < 8);
+  });
+  kept.sort((a, b) => a.ci - b.ci);
+
+  const shapes: NapShape[] = kept.map(r => {
     const c = palette[r.ci];
     return {
       type: 'polygon' as const, filled: true, color: { r: c[0], g: c[1], b: c[2] },
       points: [norm(r.x, r.y), norm(r.x + r.w, r.y), norm(r.x + r.w, r.y + r.h), norm(r.x, r.y + r.h)],
     };
   });
+  console.log(`rects: ${rects.length} total, ${kept.length} after dropping background`);
 
   const { bytes } = encodeNaplpsStandard(shapes);
   writeFileSync(output, bytes);
