@@ -72,6 +72,7 @@ export default function App() {
   const [tool, setTool] = useState<Tool>('select')
   const [preview, setPreview] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [grid, setGrid] = useState(false)
   const [drawColor, setDrawColor] = useState('#ff4040')
   // NAPLPS font-text blocks (encoded as TEXT/FIELD commands on save; the
   // viewer supplies the letterforms). Authored fresh — the decoder does not
@@ -344,6 +345,7 @@ export default function App() {
       if (e.key === 'c' && !meta) { setTool('circle'); return }
       if (e.key === 't' && !meta) { setTool('text'); return }
       if (e.key === 'p' && !meta) { setPreview(p => !p); return }
+      if (e.key === "'" && meta) { e.preventDefault(); setGrid(g => !g); return }
       if (e.key === 'd' && meta) { e.preventDefault(); duplicateSelected(); return }
       if (e.key.startsWith('Arrow') && !meta && selectedIds.size) {
         e.preventDefault()
@@ -492,6 +494,12 @@ export default function App() {
               <div style={{ flex: 1 }} />
               <button
                 className="icon-btn"
+                title="Grid (⌘') — 1/128-field grid; drawing tools snap to it"
+                onClick={() => setGrid(g => !g)}
+                style={{ width: 32, height: 32, ...(grid ? { background: 'var(--accent)', color: '#fff' } : {}) }}
+              >⌗</button>
+              <button
+                className="icon-btn"
                 title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
                 onClick={() => { setPreview(p => !p); setPlaying(false) }}
                 style={{ width: 32, height: 32, ...(preview ? { background: 'var(--accent)', color: '#fff' } : {}) }}
@@ -513,6 +521,7 @@ export default function App() {
               tool={tool}
               preview={preview}
               playing={playing}
+              grid={grid}
               onStopPlaying={() => setPlaying(false)}
               drawColor={drawColor}
               onAddShape={addShape}

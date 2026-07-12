@@ -72,6 +72,8 @@ interface Props {
   /** baud-paced playback of the encoded byte stream */
   playing?: boolean
   onStopPlaying?: () => void
+  /** show a field-space grid; drawing-tool clicks snap to it */
+  grid?: boolean
   /** hex colour for the line/text tools */
   drawColor?: string
   onAddShape?: (shape: NapShape) => void
@@ -85,7 +87,7 @@ interface Props {
 
 export default function Canvas({
   shapes, selectedIds, onSelect, onMove, handle,
-  tool = 'select', preview = false, playing = false, onStopPlaying,
+  tool = 'select', preview = false, playing = false, onStopPlaying, grid = false,
   drawColor = '#ffffff', onAddShape,
   onEditPoints, texts = [], selectedText = null, onSelectText, onAddText, onUpdateText,
 }: Props) {
@@ -97,6 +99,8 @@ export default function Canvas({
   const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null)
   // Line/poly tool draft, in NAPLPS field coordinates
   const [draft, setDraft] = useState<Array<{ x: number; y: number }>>([])
+  const draftRef = useRef(draft)
+  useEffect(() => { draftRef.current = draft }, [draft])
   // Rect/circle drag draft: anchor + current corner (field coords)
   const [dragDraft, setDragDraft] = useState<{ a: NapPoint; b: NapPoint } | null>(null)
   const dragDraftRef = useRef(dragDraft)
@@ -192,6 +196,18 @@ export default function Canvas({
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [])
 
+  // Grid: 1/128 field steps (≈5 VGA px), major line every 8 minors.
+  const GRID_STEP = 1 / 128
+  const gridRef = useRef(grid)
+  useEffect(() => { gridRef.current = grid }, [grid])
+  const snapField = useCallback((p: NapPoint): NapPoint => {
+    if (!gridRef.current) return p
+    return {
+      x: Math.round(p.x / GRID_STEP) * GRID_STEP,
+      y: Math.round(p.y / GRID_STEP) * GRID_STEP,
+    }
+  }, [GRID_STEP])
+
   // Window-level mouse tracking during drag/pan so the cursor can leave the SVG
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -247,7 +263,7 @@ export default function Canvas({
       if (mode === 'shape' && dragDraftRef.current) {
         const natX = (e.clientX - rect.left - panX) / zoom
         const natY = (e.clientY - rect.top - panY) / zoom
-        const b = { x: natX / NW, y: 0.75 - natY / NW }
+        const b = snapField({ x: natX / NW, y: 0.75 - natY / NW })
         setDragDraft(d => (d ? { ...d, b } : d))
       }
     }
@@ -366,7 +382,7 @@ export default function Canvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [rubber, onAddShape, drawColor, onEditPoints, onUpdateText]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
+  }, [rubber, onAddShape, drawColor, onEditPoints, onUpdateText, snapField]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
 
   // ── Baud playback ──────────────────────────────────────────────────────────
   // Encode once on start; advance the byte position in real time; render the
@@ -445,7 +461,7 @@ export default function Canvas({
     }
   }, [preview, shapes, texts])
 
-  // screen coords → NAPLPS field coords
+  // screen coords → NAPLPS field coords (snapped when the grid is on)
   const screenToField = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current
     if (!el) return null
@@ -453,8 +469,8 @@ export default function Canvas({
     const { zoom, panX, panY } = tfRef.current
     const natX = (clientX - rect.left - panX) / zoom
     const natY = (clientY - rect.top - panY) / zoom
-    return { x: natX / NW, y: 0.75 - natY / NW }
-  }, [])
+    return snapField({ x: natX / NW, y: 0.75 - natY / NW })
+  }, [snapField])
 
   const parseDrawColor = useCallback(() => {
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
@@ -464,16 +480,14 @@ export default function Canvas({
   }, [drawColor])
 
   const commitDraft = useCallback(() => {
-    setDraft(d => {
-      if (onAddShape) {
-        if (tool === 'poly' && d.length >= 3) {
-          onAddShape({ type: 'polygon', filled: true, color: parseDrawColor(), points: d })
-        } else if (tool === 'line' && d.length >= 2) {
-          onAddShape({ type: 'polyline', filled: false, color: parseDrawColor(), points: d })
-        }
-      }
-      return []
-    })
+    const d = draftRef.current
+    setDraft([])
+    if (!onAddShape) return
+    if (tool === 'poly' && d.length >= 3) {
+      onAddShape({ type: 'polygon', filled: true, color: parseDrawColor(), points: d })
+    } else if (tool === 'line' && d.length >= 2) {
+      onAddShape({ type: 'polyline', filled: false, color: parseDrawColor(), points: d })
+    }
   }, [onAddShape, parseDrawColor, tool])
 
   // line/poly tool keys: Enter commits, Escape cancels
@@ -573,7 +587,7 @@ export default function Canvas({
   // Double-click: finish a line draft, or enter vertex-edit mode on a shape.
   const onSvgDoubleClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (preview) return
-    if (tool === 'line') { commitDraft(); return }
+    if (tool === 'line' || tool === 'poly') { commitDraft(); return }
     if (tool !== 'select') return
     const target = e.target as SVGElement
     const idxStr = target.dataset.idx
@@ -631,6 +645,21 @@ export default function Canvas({
       >
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
           {!preview && !playing && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
+
+          {/* field grid: minor 1/128 field, major every 8 minors */}
+          {grid && !preview && !playing && (() => {
+            const minor = NW / 128
+            const lines: React.ReactNode[] = []
+            for (let i = 0; i <= 128; i++) {
+              const v = i * minor
+              const isMajor = i % 8 === 0
+              lines.push(<line key={'v' + i} x1={v} y1={0} x2={v} y2={NH}
+                stroke={isMajor ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)'} strokeWidth={1 / zoom} />)
+              if (v <= NH) lines.push(<line key={'h' + i} x1={0} y1={v} x2={NW} y2={v}
+                stroke={isMajor ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)'} strokeWidth={1 / zoom} />)
+            }
+            return <g pointerEvents="none">{lines}</g>
+          })()}
 
           {!preview && !playing && shapes.map((shape, i) => {
             const selected = selectedIds.has(i)
