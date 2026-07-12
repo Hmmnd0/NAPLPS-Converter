@@ -81,6 +81,8 @@ export default function App() {
   const [filePath, setFilePath] = useState<string | null>(null)
   const [fileName, setFileName] = useState('Untitled')
   const [dirty, setDirty] = useState(false)
+  // editor body is shown once a file is opened OR a blank canvas is started
+  const [started, setStarted] = useState(false)
   const canvasHandle = useRef<CanvasHandle | null>(null)
 
   const pushHistory = useCallback((prev: NapShape[]) => {
@@ -132,6 +134,7 @@ export default function App() {
       setFilePath(result.path)
       setFileName(result.path.split('/').pop() ?? result.path)
       setDirty(false)
+      setStarted(true)
     } catch (e) {
       alert(`Failed to decode: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -406,71 +409,11 @@ export default function App() {
             className="icon-btn"
             title="Save (⌘S)"
             onClick={saveFile}
-            disabled={!shapes.length}
+            disabled={!shapes.length && !texts.length}
           >⌘S</button>
           <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
           <button className="icon-btn" title="Undo (⌘Z)" onClick={undo} disabled={!history.length}>↩</button>
           <button className="icon-btn" title="Redo (⌘⇧Z)" onClick={redo} disabled={!future.length}>↪</button>
-          <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
-          <button
-            className="icon-btn"
-            title="Select tool (V)"
-            onClick={() => setTool('select')}
-            style={tool === 'select' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >⬚</button>
-          <button
-            className="icon-btn"
-            title="Line tool (L) — click to add points, Enter/double-click to finish, Esc to cancel. Best for straight strokes: TURSHOW dashes tight curves."
-            onClick={() => setTool('line')}
-            style={tool === 'line' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >╱</button>
-          <button
-            className="icon-btn"
-            title="Rectangle tool (R) — drag to draw a filled rect"
-            onClick={() => setTool('rect')}
-            style={tool === 'rect' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >▭</button>
-          <button
-            className="icon-btn"
-            title="Polygon tool (G) — click to add vertices, Enter/double-click to finish, Esc to cancel"
-            onClick={() => setTool('poly')}
-            style={tool === 'poly' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >⬠</button>
-          <button
-            className="icon-btn"
-            title="Circle tool (C) — drag from centre"
-            onClick={() => setTool('circle')}
-            style={tool === 'circle' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >◯</button>
-          <button
-            className="icon-btn"
-            title="Text tool (T) — click to place a NAPLPS font-text block. The viewer supplies the letterforms."
-            onClick={() => setTool('text')}
-            style={tool === 'text' ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >T</button>
-          {tool !== 'select' && (
-            <input
-              type="color"
-              value={drawColor}
-              onChange={e => setDrawColor(e.target.value)}
-              title="Draw colour"
-              style={{ width: 26, height: 24, padding: 1, alignSelf: 'center' }}
-            />
-          )}
-          <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
-          <button
-            className="icon-btn"
-            title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
-            onClick={() => { setPreview(p => !p); setPlaying(false) }}
-            style={preview ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >👁</button>
-          <button
-            className="icon-btn"
-            title="Baud playback — draw the file at ~13k baud, the way a period modem session painted it"
-            onClick={() => { setPlaying(p => !p); if (!playing) setPreview(false) }}
-            style={playing ? { background: 'var(--accent)', color: '#fff' } : undefined}
-            disabled={!shapes.length && !texts.length}
-          >⏵</button>
           <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
           <button className="icon-btn" title="Zoom In (⌘=)" onClick={() => canvasHandle.current?.zoomIn()}>+</button>
           <button className="icon-btn" title="Zoom Out (⌘-)" onClick={() => canvasHandle.current?.zoomOut()}>−</button>
@@ -480,7 +423,7 @@ export default function App() {
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {shapes.length === 0 ? (
+        {!started ? (
           <div
             style={{
               flex: 1,
@@ -493,16 +436,74 @@ export default function App() {
             }}
           >
             <div style={{ fontSize: 48 }}>🖼</div>
-            <div style={{ fontSize: 16 }}>Open a .nap file to start editing</div>
-            <button className="primary" style={{ fontSize: 14, padding: '8px 20px' }} onClick={openFile}>
-              Open .nap file…
-            </button>
+            <div style={{ fontSize: 16 }}>Open a .nap file, or start drawing on a blank canvas</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="primary" style={{ fontSize: 14, padding: '8px 20px' }} onClick={openFile}>
+                Open .nap file…
+              </button>
+              <button style={{ fontSize: 14, padding: '8px 20px' }} onClick={() => { setStarted(true); setFileName('Untitled'); }}>
+                New blank canvas
+              </button>
+            </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               ⌘O to open · Space + drag to pan · ⌘scroll to zoom
             </div>
           </div>
         ) : (
           <>
+            {/* Illustrator-style tool strip */}
+            <div style={{
+              width: 44,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
+              padding: '10px 0',
+              background: 'var(--surface)',
+              borderRight: '1px solid var(--border)',
+            }}>
+              {([
+                ['select', '⬚', 'Select (V)'],
+                ['line', '╱', 'Line (L) — click points, Enter to finish. Straight strokes only: TURSHOW dashes tight curves'],
+                ['rect', '▭', 'Rectangle (R) — drag'],
+                ['poly', '⬠', 'Polygon (G) — click vertices, Enter/double-click to finish'],
+                ['circle', '◯', 'Circle (C) — drag from centre'],
+                ['text', 'T', 'Text (T) — click to place a NAPLPS font-text block'],
+              ] as Array<[Tool, string, string]>).map(([t, icon, tip]) => (
+                <button
+                  key={t}
+                  className="icon-btn"
+                  title={tip}
+                  onClick={() => setTool(t)}
+                  style={{
+                    width: 32, height: 32, fontSize: 15,
+                    ...(tool === t ? { background: 'var(--accent)', color: '#fff' } : {}),
+                  }}
+                >{icon}</button>
+              ))}
+              <input
+                type="color"
+                value={drawColor}
+                onChange={e => setDrawColor(e.target.value)}
+                title="Draw colour"
+                style={{ width: 28, height: 26, padding: 1, marginTop: 4 }}
+              />
+              <div style={{ flex: 1 }} />
+              <button
+                className="icon-btn"
+                title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
+                onClick={() => { setPreview(p => !p); setPlaying(false) }}
+                style={{ width: 32, height: 32, ...(preview ? { background: 'var(--accent)', color: '#fff' } : {}) }}
+              >👁</button>
+              <button
+                className="icon-btn"
+                title="Baud playback — draw the file at ~13k baud, the way a period modem session painted it"
+                onClick={() => { setPlaying(p => !p); if (!playing) setPreview(false) }}
+                style={{ width: 32, height: 32, ...(playing ? { background: 'var(--accent)', color: '#fff' } : {}) }}
+                disabled={!shapes.length && !texts.length}
+              >⏵</button>
+            </div>
             <Canvas
               shapes={shapes}
               selectedIds={selectedIds}
