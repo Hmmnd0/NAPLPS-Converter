@@ -3,9 +3,8 @@ import Canvas, { type CanvasHandle } from './components/Canvas'
 import ColorPanel from './components/ColorPanel'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard, type NapText } from '@lib/naplps-std-encoder'
-import { dpSimplify, simplifyForHardware } from '@lib/regionTrace'
-import { lintShapes, splitPolygonForHardware } from '@lib/turshowSim'
-import polygonClipping from 'polygon-clipping'
+import { dpSimplify } from '@lib/regionTrace'
+import { lintShapes, splitPolygonForHardware, mergeShapesForHardware } from '@lib/turshowSim'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
 export type Tool = 'select' | 'line' | 'rect' | 'poly' | 'circle' | 'text'
@@ -14,55 +13,7 @@ function fmtBytes(n: number) {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`
 }
 
-// Period renderers (TURSHOW etc.) use fixed static vertex buffers — same cap as
-// the converter pipeline's MAX_POLY_VERTS.
-const MAX_VERTS = 64
-// Tolerances are exposed to the user in "pixels" (a 640px-wide VGA display);
-// shape coords are 0..1 field units, so scale before simplifying. Passing a
-// pixel-scale epsilon to field-unit points would collapse everything.
-const FIELD_PX = 1 / 640
-
 const MAX_HISTORY = 50
-
-function mergeShapesIntoPolys(selected: NapShape[], color: NapShape['color']): NapShape[] {
-  const polys = selected.filter(s => s.points.length >= 3)
-  if (!polys.length) return []
-
-  // Convert each NAPLPS shape to polygon-clipping's ring format [[x,y]...]
-  // NAPLPS coords are Y-up; we pass them as-is since the union algorithm is
-  // direction-agnostic for simple polygons.
-  const rings = polys.map(s =>
-    [s.points.map(p => [p.x, p.y] as [number, number])] as polygonClipping.Polygon
-  )
-
-  const [first, ...rest] = rings
-  let unionResult: polygonClipping.MultiPolygon
-  try {
-    unionResult = polygonClipping.union(first, ...rest)
-  } catch {
-    return []
-  }
-
-  return unionResult.map((multiPolyRing): NapShape | null => {
-    // multiPolyRing[0] is the outer ring; [1..] would be holes (ignore for NAPLPS)
-    const outer = multiPolyRing[0]
-    // polygon-clipping closes the ring (last point == first); drop the duplicate
-    const pts = outer[outer.length - 1][0] === outer[0][0] && outer[outer.length - 1][1] === outer[0][1]
-      ? outer.slice(0, -1)
-      : outer
-    if (pts.length < 3) return null
-    let points = pts.map(([x, y]) => ({ x, y }))
-    // Union output can be arbitrarily vertex-heavy; keep it renderable.
-    if (points.length > MAX_VERTS) points = simplifyForHardware(points, 1.5 * FIELD_PX)
-    if (points.length < 3) return null
-    return {
-      type: 'polygon' as const,
-      filled: true,
-      color,
-      points,
-    }
-  }).filter((s): s is NapShape => s !== null)
-}
 
 export default function App() {
   const [shapes, setShapes] = useState<NapShape[]>([])
@@ -171,8 +122,9 @@ export default function App() {
     if (selectedIds.size < 2) return
     const selected = shapes.filter((_, i) => selectedIds.has(i))
     const color = selected[0].color
-    const merged = mergeShapesIntoPolys(selected, color)
-    if (!merged.length) return
+    const pieces = mergeShapesForHardware(selected)
+    if (!pieces.length) return
+    const merged: NapShape[] = pieces.map(points => ({ type: 'polygon', filled: true, color, points }))
     const rest = shapes.filter((_, i) => !selectedIds.has(i))
     mutate([...rest, ...merged])
   }, [shapes, selectedIds, mutate])

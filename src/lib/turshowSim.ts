@@ -146,6 +146,48 @@ export function splitPolygonForHardware(pts: NapPoint[]): NapPoint[][] {
   return pieces.map(piece => piece.map(q => ({ x: q.x / W, y: (1 - q.y / H) * 0.75 })));
 }
 
+// Merge filled shapes by union-rasterizing them onto the VGA grid and
+// re-tracing the mask into hardware-safe polygons. Unlike geometric union,
+// this cannot bridge disjoint lobes, drops nothing, needs no lossy vertex-cap
+// simplify — and the result is exactly what the shapes already rendered as.
+export function mergeShapesForHardware(list: NapShape[]): NapPoint[][] {
+  const W = SIM_W, H = SIM_H;
+  const mask = new Uint8Array(W * H);
+  const set = (x: number, y: number) => {
+    if (x >= 0 && y >= 0 && x < W && y < H) mask[y * W + x] = 1;
+  };
+  for (const s of list) {
+    if (s.points.length < 3) continue;
+    const px = s.points.map(p => ({ x: p.x * W, y: (1 - p.y / 0.75) * H }));
+    let yMin = Infinity, yMax = -Infinity;
+    for (const p of px) { if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y; }
+    const xs: number[] = [];
+    for (let y = Math.max(0, Math.floor(yMin)); y <= Math.min(H - 1, Math.ceil(yMax)); y++) {
+      const yc = y + 0.5;
+      xs.length = 0;
+      for (let i = 0, j = px.length - 1; i < px.length; j = i++) {
+        const a = px[j], b = px[i];
+        if ((a.y <= yc && b.y > yc) || (b.y <= yc && a.y > yc)) {
+          xs.push(a.x + ((yc - a.y) / (b.y - a.y)) * (b.x - a.x));
+        }
+      }
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        for (let x = Math.round(xs[k]); x <= Math.round(xs[k + 1]); x++) set(x, y);
+      }
+    }
+    for (let i = 0, j = px.length - 1; i < px.length; j = i++) {
+      const a = px[j], b = px[i];
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y))));
+      for (let t = 0; t <= steps; t++) {
+        set(Math.round(a.x + ((b.x - a.x) * t) / steps), Math.round(a.y + ((b.y - a.y) * t) / steps));
+      }
+    }
+  }
+  return traceMaskToPolygons(mask, W, H)
+    .map(piece => piece.map(q => ({ x: q.x / W, y: (1 - q.y / H) * 0.75 })));
+}
+
 export function lintShapes(shapes: NapShape[]): ShapeLint[] {
   const out: ShapeLint[] = [];
   shapes.forEach((s, index) => {

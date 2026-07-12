@@ -472,6 +472,43 @@ export default function Canvas({
     return snapField({ x: natX / NW, y: 0.75 - natY / NW })
   }, [snapField])
 
+  // Tool-point resolver shared by the live preview and the actual clicks, so
+  // what you see is exactly what commits. With Shift held:
+  //  1. snap to the nearest existing vertex within ~8 screen px (registration
+  //     against already-drawn geometry), else
+  //  2. constrain the segment from the previous draft point to 45° increments
+  //     (Illustrator's shift behaviour).
+  const resolveToolPoint = useCallback((clientX: number, clientY: number, shift: boolean): NapPoint | null => {
+    const p = screenToField(clientX, clientY)
+    if (!p || !shift) return p
+    const { zoom } = tfRef.current
+    const threshold = 8 / (zoom * NW) // 8 screen px in field units
+    let best: NapPoint | null = null
+    let bestD = threshold
+    for (const s of shapesRef.current) {
+      for (const q of s.points) {
+        const d = Math.hypot(q.x - p.x, q.y - p.y)
+        if (d < bestD) { bestD = d; best = q }
+      }
+    }
+    if (best) return { x: best.x, y: best.y }
+    const last = draftRef.current[draftRef.current.length - 1]
+    if (last) {
+      const dx = p.x - last.x, dy = p.y - last.y
+      const len = Math.hypot(dx, dy)
+      if (len > 1e-6) {
+        const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+        return { x: last.x + len * Math.cos(ang), y: last.y + len * Math.sin(ang) }
+      }
+    }
+    return p
+  }, [screenToField])
+
+  // Live cursor point for the drawing tools (drives the Illustrator-style
+  // rubber-band segment preview behind the cursor).
+  const [cursorPt, setCursorPt] = useState<NapPoint | null>(null)
+  useEffect(() => { if (tool === 'select' || preview || playing) setCursorPt(null) }, [tool, preview, playing])
+
   const parseDrawColor = useCallback(() => {
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
     return m
@@ -519,7 +556,7 @@ export default function Canvas({
     if (preview || playing) return // view-only; pan/zoom still available
 
     if (tool === 'line' || tool === 'poly') {
-      const p = screenToField(e.clientX, e.clientY)
+      const p = resolveToolPoint(e.clientX, e.clientY, e.shiftKey)
       if (p) setDraft(d => [...d, p])
       return
     }
@@ -642,6 +679,10 @@ export default function Canvas({
         style={{ display: 'block', position: 'absolute', inset: 0 }}
         onMouseDown={onSvgMouseDown}
         onDoubleClick={onSvgDoubleClick}
+        onMouseMove={tool !== 'select' && !preview && !playing
+          ? e => setCursorPt(resolveToolPoint(e.clientX, e.clientY, e.shiftKey))
+          : undefined}
+        onMouseLeave={() => setCursorPt(null)}
       >
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
           {!preview && !playing && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
@@ -841,6 +882,21 @@ export default function Canvas({
                 const sp = toSvg(p)
                 return <circle key={i} cx={sp.x} cy={sp.y} r={2.5 / zoom} fill="#0a84ff" />
               })}
+            </g>
+          )}
+
+          {/* rubber-band preview: last draft point → cursor (Illustrator-style) */}
+          {(tool === 'line' || tool === 'poly') && cursorPt && (
+            <g pointerEvents="none">
+              {draft.length > 0 && (() => {
+                const a = toSvg(draft[draft.length - 1]), b = toSvg(cursorPt)
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                  stroke={drawColor} strokeWidth={1.5 / zoom} strokeDasharray={`${3 / zoom} ${3 / zoom}`} opacity={0.7} />
+              })()}
+              {(() => {
+                const c = toSvg(cursorPt)
+                return <circle cx={c.x} cy={c.y} r={3 / zoom} fill="none" stroke={drawColor} strokeWidth={1 / zoom} />
+              })()}
             </g>
           )}
 
