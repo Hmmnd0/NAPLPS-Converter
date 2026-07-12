@@ -34,6 +34,8 @@ interface Props {
   onSimplify: (tolerance: number) => void
   onConvertToLines: () => void
   onReorder: (where: 'back' | 'front' | 'down' | 'up') => void
+  onFlip: (axis: 'h' | 'v') => void
+  onDuplicate: () => void
   texts: NapText[]
   selectedText: number | null
   onSelectText: (i: number | null) => void
@@ -43,6 +45,7 @@ interface Props {
 
 export default function ColorPanel({
   shapes, selectedIds, onSelect, onDelete, onMerge, onRecolor, onSortByColor, onSimplify, onConvertToLines, onReorder,
+  onFlip, onDuplicate,
   texts, selectedText, onSelectText, onUpdateText, onDeleteText,
 }: Props) {
   const [recolorHex, setRecolorHex] = useState('#ffffff')
@@ -150,6 +153,10 @@ export default function ColorPanel({
           <button onClick={() => onReorder('down')} disabled={selCount === 0} title="Draw one step earlier" style={{ fontSize: 11, padding: '3px 8px' }}>↑</button>
           <button onClick={() => onReorder('up')} disabled={selCount === 0} title="Draw one step later" style={{ fontSize: 11, padding: '3px 8px' }}>↓</button>
           <button onClick={() => onReorder('front')} disabled={selCount === 0} title="Draw last — top of the stack, paints over everything" style={{ fontSize: 11, padding: '3px 8px' }}>⤓</button>
+          <div style={{ width: 1, background: 'var(--border)' }} />
+          <button onClick={() => onFlip('h')} disabled={selCount === 0} title="Flip horizontally (about the selection centre)" style={{ fontSize: 11, padding: '3px 8px' }}>⇋</button>
+          <button onClick={() => onFlip('v')} disabled={selCount === 0} title="Flip vertically (about the selection centre)" style={{ fontSize: 11, padding: '3px 8px' }}>⇵</button>
+          <button onClick={onDuplicate} disabled={selCount === 0} title="Duplicate selection (⌘D)" style={{ fontSize: 11, padding: '3px 8px' }}>⧉</button>
         </div>
       </div>
 

@@ -1,8 +1,13 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { renderTurshowSim, SIM_W, SIM_H } from '@lib/turshowSim'
+import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
+import { encodeNaplpsStandard } from '@lib/naplps-std-encoder'
 import type { NapShape, NapPoint } from '@lib/naplps-std-decoder'
 import type { NapText } from '@lib/naplps-std-encoder'
 import type { Tool } from '../App'
+
+// Period modem pacing observed in TURSHOW: ~13288 baud ≈ 1329 bytes/s.
+const BAUD_BYTES_PER_S = 1329
 
 // NAPLPS field: x ∈ [0,1], y ∈ [0,0.75], Y-up.
 // Natural SVG space: 1000×750px, Y-down.
@@ -64,6 +69,9 @@ interface Props {
   tool?: Tool
   /** TURSHOW-faithful raster preview instead of the editable vector view */
   preview?: boolean
+  /** baud-paced playback of the encoded byte stream */
+  playing?: boolean
+  onStopPlaying?: () => void
   /** hex colour for the line/text tools */
   drawColor?: string
   onAddShape?: (shape: NapShape) => void
@@ -77,7 +85,8 @@ interface Props {
 
 export default function Canvas({
   shapes, selectedIds, onSelect, onMove, handle,
-  tool = 'select', preview = false, drawColor = '#ffffff', onAddShape,
+  tool = 'select', preview = false, playing = false, onStopPlaying,
+  drawColor = '#ffffff', onAddShape,
   onEditPoints, texts = [], selectedText = null, onSelectText, onAddText, onUpdateText,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -86,9 +95,19 @@ export default function Canvas({
   const [hovered, setHovered] = useState<number | null>(null)
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null)
-  // Line tool draft, in NAPLPS field coordinates
+  // Line/poly tool draft, in NAPLPS field coordinates
   const [draft, setDraft] = useState<Array<{ x: number; y: number }>>([])
+  // Rect/circle drag draft: anchor + current corner (field coords)
+  const [dragDraft, setDragDraft] = useState<{ a: NapPoint; b: NapPoint } | null>(null)
+  const dragDraftRef = useRef(dragDraft)
+  useEffect(() => { dragDraftRef.current = dragDraft }, [dragDraft])
+  const toolRef = useRef(tool)
+  useEffect(() => { toolRef.current = tool }, [tool])
   const previewCanvasRef = useRef<HTMLCanvasElement>(null)
+  // Baud playback: encoded bytes + current position (bytes drawn so far)
+  const [playPos, setPlayPos] = useState(0)
+  const [playPaused, setPlayPaused] = useState(false)
+  const playBytesRef = useRef<Uint8Array | null>(null)
   // Vertex editing: which shape is in vertex mode, live-dragged points
   const [editIdx, setEditIdx] = useState<number | null>(null)
   const [editPts, setEditPts] = useState<NapPoint[] | null>(null)
@@ -120,7 +139,7 @@ export default function Canvas({
     originalShapes: NapShape[]
     moved: boolean
   } | null>(null)
-  const pointerMode = useRef<'none' | 'pan' | 'drag' | 'rubber' | 'vertex' | 'text'>('none')
+  const pointerMode = useRef<'none' | 'pan' | 'drag' | 'rubber' | 'vertex' | 'text' | 'shape'>('none')
 
   const fitToWindow = useCallback(() => {
     const el = containerRef.current
@@ -222,6 +241,14 @@ export default function Canvas({
         const dx = (e.clientX - td.startX) / zoom / NW
         const dy = -(e.clientY - td.startY) / zoom / NW
         onUpdateText?.(td.ti, { x: td.origX + dx, y: td.origY + dy })
+        return
+      }
+
+      if (mode === 'shape' && dragDraftRef.current) {
+        const natX = (e.clientX - rect.left - panX) / zoom
+        const natY = (e.clientY - rect.top - panY) / zoom
+        const b = { x: natX / NW, y: 0.75 - natY / NW }
+        setDragDraft(d => (d ? { ...d, b } : d))
       }
     }
 
@@ -270,6 +297,39 @@ export default function Canvas({
         return
       }
 
+      if (mode === 'shape') {
+        const d = dragDraftRef.current
+        setDragDraft(null)
+        if (d && onAddShape) {
+          const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
+          const color = m
+            ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+            : { r: 255, g: 255, b: 255 }
+          const MIN = 2 / 2048 // ignore accidental clicks
+          if (toolRef.current === 'rect') {
+            const x0 = Math.min(d.a.x, d.b.x), x1 = Math.max(d.a.x, d.b.x)
+            const y0 = Math.min(d.a.y, d.b.y), y1 = Math.max(d.a.y, d.b.y)
+            if (x1 - x0 > MIN && y1 - y0 > MIN) {
+              onAddShape({
+                type: 'polygon', filled: true, color,
+                points: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
+              })
+            }
+          } else if (toolRef.current === 'circle') {
+            const r = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y)
+            if (r > MIN) {
+              const pts: NapPoint[] = []
+              for (let k = 0; k < 24; k++) {
+                const t = (2 * Math.PI * k) / 24
+                pts.push({ x: d.a.x + r * Math.cos(t), y: d.a.y + r * Math.sin(t) })
+              }
+              onAddShape({ type: 'polygon', filled: true, color, points: pts })
+            }
+          }
+        }
+        return
+      }
+
       if (mode === 'rubber') {
         // Use rubber directly from closure (it's in the useEffect dep array so it's current).
         // Don't use a setRubber updater — calling onSelectRef inside an updater triggers
@@ -306,7 +366,59 @@ export default function Canvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [rubber]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
+  }, [rubber, onAddShape, drawColor, onEditPoints, onUpdateText]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
+
+  // ── Baud playback ──────────────────────────────────────────────────────────
+  // Encode once on start; advance the byte position in real time; render the
+  // decoded PREFIX each frame. Truncated tails decode safely (streaming
+  // decoder drops the incomplete command), so any byte position is valid —
+  // this shows exactly what a caller saw as the file painted over the modem.
+  useEffect(() => {
+    if (!playing) { playBytesRef.current = null; setPlayPos(0); setPlayPaused(false); return }
+    try {
+      playBytesRef.current = encodeNaplpsStandard(shapes, { texts }).bytes
+    } catch { onStopPlaying?.(); return }
+    setPlayPos(0)
+    setPlayPaused(false)
+  }, [playing, shapes, texts, onStopPlaying])
+
+  useEffect(() => {
+    if (!playing || playPaused) return
+    let raf = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      const total = playBytesRef.current?.length ?? 0
+      const dt = (now - last) / 1000
+      last = now
+      setPlayPos(p => Math.min(total, p + dt * BAUD_BYTES_PER_S))
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing, playPaused])
+
+  useEffect(() => {
+    if (!playing) return
+    const bytes = playBytesRef.current
+    const canvas = previewCanvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!bytes || !canvas || !ctx) return
+    const slice = bytes.slice(0, Math.floor(playPos))
+    const dec = decodeNaplpsStandard(slice)
+    const frame = renderTurshowSim(dec.shapes)
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(frame.pixels), frame.width, frame.height), 0, 0)
+    for (const t of dec.texts) {
+      const fontSize = (t.charH ?? 0.028) * (SIM_H / 0.75)
+      const charW = (t.charW ?? 0.0145) * SIM_W
+      const c = t.color ?? { r: 255, g: 255, b: 255 }
+      ctx.font = `${fontSize}px Courier, monospace`
+      ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`
+      try { (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${charW - 0.6 * fontSize}px` } catch { /* older engines */ }
+      t.lines.forEach((line, k) => {
+        ctx.fillText(line, t.x * SIM_W, (1 - (t.y - (k + 0.8) * (t.charH ?? 0.028)) / 0.75) * (SIM_H - 1))
+      })
+    }
+  }, [playing, playPos])
 
   // TURSHOW preview raster
   useEffect(() => {
@@ -344,22 +456,29 @@ export default function Canvas({
     return { x: natX / NW, y: 0.75 - natY / NW }
   }, [])
 
+  const parseDrawColor = useCallback(() => {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
+    return m
+      ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+      : { r: 255, g: 255, b: 255 }
+  }, [drawColor])
+
   const commitDraft = useCallback(() => {
     setDraft(d => {
-      if (d.length >= 2 && onAddShape) {
-        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
-        const color = m
-          ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
-          : { r: 255, g: 255, b: 255 }
-        onAddShape({ type: 'polyline', filled: false, color, points: d })
+      if (onAddShape) {
+        if (tool === 'poly' && d.length >= 3) {
+          onAddShape({ type: 'polygon', filled: true, color: parseDrawColor(), points: d })
+        } else if (tool === 'line' && d.length >= 2) {
+          onAddShape({ type: 'polyline', filled: false, color: parseDrawColor(), points: d })
+        }
       }
       return []
     })
-  }, [onAddShape, drawColor])
+  }, [onAddShape, parseDrawColor, tool])
 
-  // line tool keys: Enter commits, Escape cancels
+  // line/poly tool keys: Enter commits, Escape cancels
   useEffect(() => {
-    if (tool !== 'line') return
+    if (tool !== 'line' && tool !== 'poly') return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter') { e.preventDefault(); commitDraft() }
       if (e.key === 'Escape') setDraft([])
@@ -369,7 +488,10 @@ export default function Canvas({
   }, [tool, commitDraft])
 
   // leaving the tool or entering preview drops any draft
-  useEffect(() => { if (tool !== 'line' || preview) setDraft([]) }, [tool, preview])
+  useEffect(() => {
+    if ((tool !== 'line' && tool !== 'poly') || preview) setDraft([])
+    if ((tool !== 'rect' && tool !== 'circle') || preview) setDragDraft(null)
+  }, [tool, preview])
 
   const onSvgMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (e.button === 1 || spaceHeld) {
@@ -380,11 +502,20 @@ export default function Canvas({
     }
     if (e.button !== 0) return
 
-    if (preview) return // view-only; pan/zoom still available
+    if (preview || playing) return // view-only; pan/zoom still available
 
-    if (tool === 'line') {
+    if (tool === 'line' || tool === 'poly') {
       const p = screenToField(e.clientX, e.clientY)
       if (p) setDraft(d => [...d, p])
+      return
+    }
+
+    if (tool === 'rect' || tool === 'circle') {
+      const p = screenToField(e.clientX, e.clientY)
+      if (p) {
+        setDragDraft({ a: p, b: p })
+        pointerMode.current = 'shape'
+      }
       return
     }
 
@@ -437,7 +568,7 @@ export default function Canvas({
     if (!e.shiftKey) onSelect(new Set())
     pointerMode.current = 'rubber'
     setRubber({ sx: e.clientX, sy: e.clientY, ex: e.clientX, ey: e.clientY })
-  }, [spaceHeld, selectedIds, onSelect, shapes, tool, preview, screenToField, drawColor, onAddText, onSelectText])
+  }, [spaceHeld, selectedIds, onSelect, shapes, tool, preview, playing, screenToField, drawColor, onAddText, onSelectText])
 
   // Double-click: finish a line draft, or enter vertex-edit mode on a shape.
   const onSvgDoubleClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
@@ -470,7 +601,7 @@ export default function Canvas({
   const isDragging = dragOffset !== null
   const cursor = spaceHeld
     ? (pointerMode.current === 'pan' ? 'grabbing' : 'grab')
-    : tool === 'line' && !preview ? 'crosshair'
+    : tool !== 'select' && !preview && !playing ? 'crosshair'
     : isDragging ? 'move' : 'default'
 
   return (
@@ -478,7 +609,7 @@ export default function Canvas({
       ref={containerRef}
       style={{ flex: 1, position: 'relative', overflow: 'hidden', cursor, background: '#111' }}
     >
-      {preview && (
+      {(preview || playing) && (
         <canvas
           ref={previewCanvasRef}
           width={SIM_W}
@@ -499,9 +630,9 @@ export default function Canvas({
         onDoubleClick={onSvgDoubleClick}
       >
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
-          {!preview && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
+          {!preview && !playing && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
 
-          {!preview && shapes.map((shape, i) => {
+          {!preview && !playing && shapes.map((shape, i) => {
             const selected = selectedIds.has(i)
             const hov = hovered === i && !selected
             const pts = selected && dragOffset
@@ -559,7 +690,7 @@ export default function Canvas({
           })}
 
           {/* font-text blocks */}
-          {!preview && texts.map((t, ti) => {
+          {!preview && !playing && texts.map((t, ti) => {
             const fontSize = (t.charH ?? 0.028) * NW
             const charW = (t.charW ?? 0.0145) * NW
             const spacing = charW - 0.6 * fontSize
@@ -607,7 +738,7 @@ export default function Canvas({
           })}
 
           {/* vertex-edit handles */}
-          {!preview && editIdx !== null && shapes[editIdx] && (() => {
+          {!preview && !playing && editIdx !== null && shapes[editIdx] && (() => {
             const shape = shapes[editIdx]
             const pts = editPts ?? shape.points
             const minPts = shape.type === 'polygon' ? 3 : 2
@@ -667,12 +798,12 @@ export default function Canvas({
             )
           })()}
 
-          {/* line-tool draft */}
+          {/* line/poly tool draft */}
           {draft.length > 0 && (
             <g pointerEvents="none">
               <polyline
-                points={pointsStr(draft)}
-                fill="none"
+                points={pointsStr(tool === 'poly' && draft.length >= 3 ? [...draft, draft[0]] : draft)}
+                fill={tool === 'poly' && draft.length >= 3 ? drawColor + '33' : 'none'}
                 stroke={drawColor}
                 strokeWidth={1.5 / zoom}
                 strokeDasharray={`${4 / zoom} ${3 / zoom}`}
@@ -683,8 +814,60 @@ export default function Canvas({
               })}
             </g>
           )}
+
+          {/* rect/circle drag draft */}
+          {dragDraft && (() => {
+            const a = toSvg(dragDraft.a), b = toSvg(dragDraft.b)
+            if (tool === 'circle') {
+              const r = Math.hypot(b.x - a.x, b.y - a.y)
+              return <circle cx={a.x} cy={a.y} r={r} fill={drawColor + '55'} stroke={drawColor} strokeWidth={1.5 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} pointerEvents="none" />
+            }
+            return (
+              <rect
+                x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)}
+                width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)}
+                fill={drawColor + '55'} stroke={drawColor}
+                strokeWidth={1.5 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+                pointerEvents="none"
+              />
+            )
+          })()}
         </g>
       </svg>
+
+      {/* Baud playback transport */}
+      {playing && (() => {
+        const total = playBytesRef.current?.length ?? 0
+        const secs = (n: number) => (n / BAUD_BYTES_PER_S).toFixed(1)
+        return (
+          <div style={{
+            position: 'absolute', left: 12, right: 12, bottom: 34,
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(20,20,20,0.85)', border: '1px solid var(--border)',
+            borderRadius: 8, padding: '6px 12px',
+          }}>
+            <button
+              className="icon-btn"
+              onClick={() => {
+                if (!playPaused && playPos >= total) setPlayPos(0) // replay from end
+                setPlayPaused(p => !p)
+              }}
+              title={playPaused ? 'Resume' : 'Pause'}
+            >{playPaused || playPos >= total ? '⏵' : '⏸'}</button>
+            <input
+              type="range"
+              min={0} max={total} step={1}
+              value={Math.floor(playPos)}
+              onChange={e => { setPlayPaused(true); setPlayPos(Number(e.target.value)) }}
+              style={{ flex: 1 }}
+            />
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+              {Math.floor(playPos).toLocaleString()} / {total.toLocaleString()} B · {secs(playPos)}s / {secs(total)}s @ 13k baud
+            </span>
+            <button className="icon-btn" onClick={() => onStopPlaying?.()} title="Stop">⏹</button>
+          </div>
+        )
+      })()}
 
       {/* Rubber band overlay */}
       {rubber && (() => {
@@ -714,6 +897,7 @@ export default function Canvas({
         {Math.round(zoom * 100)}%
         {isDragging && <span style={{ marginLeft: 8 }}>moving…</span>}
         {preview && <span style={{ marginLeft: 8, color: '#e6a23c' }}>TURSHOW preview</span>}
+        {playing && <span style={{ marginLeft: 8, color: '#e6a23c' }}>baud playback</span>}
         {draft.length > 0 && <span style={{ marginLeft: 8 }}>{draft.length} pts — Enter/double-click to finish, Esc to cancel</span>}
       </div>
     </div>

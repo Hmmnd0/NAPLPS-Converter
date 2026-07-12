@@ -8,7 +8,7 @@ import { lintShapes, splitPolygonForHardware } from '@lib/turshowSim'
 import polygonClipping from 'polygon-clipping'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
-export type Tool = 'select' | 'line' | 'text'
+export type Tool = 'select' | 'line' | 'rect' | 'poly' | 'circle' | 'text'
 
 function fmtBytes(n: number) {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`
@@ -71,6 +71,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [tool, setTool] = useState<Tool>('select')
   const [preview, setPreview] = useState(false)
+  const [playing, setPlaying] = useState(false)
   const [drawColor, setDrawColor] = useState('#ff4040')
   // NAPLPS font-text blocks (encoded as TEXT/FIELD commands on save; the
   // viewer supplies the letterforms). Authored fresh — the decoder does not
@@ -256,6 +257,46 @@ export default function App() {
     mutate(next)
   }, [shapes, lint, mutate])
 
+  // Duplicate the selection with a small offset; select the clones.
+  const duplicateSelected = useCallback(() => {
+    if (!selectedIds.size) return
+    const clones = shapes
+      .filter((_, i) => selectedIds.has(i))
+      .map(s => ({ ...s, points: s.points.map(p => ({ x: p.x + 0.01, y: p.y - 0.01 })) }))
+    setShapes(prev => { pushHistory(prev); return [...prev, ...clones] })
+    const base = shapes.length
+    setSelectedIds(new Set(clones.map((_, k) => base + k)))
+  }, [shapes, selectedIds, pushHistory])
+
+  // Arrow-key nudge: one coordinate step (1/2048 field, ≈0.3 VGA px); ×8 with Shift.
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    if (!selectedIds.size) return
+    setShapes(prev => {
+      pushHistory(prev)
+      return prev.map((s, i) => selectedIds.has(i)
+        ? { ...s, points: s.points.map(p => ({ x: p.x + dx, y: p.y + dy })) }
+        : s)
+    })
+  }, [selectedIds, pushHistory])
+
+  // Mirror the selection about its own bounding-box centre.
+  const flipSelected = useCallback((axis: 'h' | 'v') => {
+    if (!selectedIds.size) return
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity
+    shapes.forEach((s, i) => {
+      if (!selectedIds.has(i)) return
+      for (const p of s.points) {
+        if (p.x < mnx) mnx = p.x; if (p.x > mxx) mxx = p.x
+        if (p.y < mny) mny = p.y; if (p.y > mxy) mxy = p.y
+      }
+    })
+    if (!isFinite(mnx)) return
+    const cx = (mnx + mxx) / 2, cy = (mny + mxy) / 2
+    mutate(shapes.map((s, i) => selectedIds.has(i)
+      ? { ...s, points: s.points.map(p => axis === 'h' ? { x: 2 * cx - p.x, y: p.y } : { x: p.x, y: 2 * cy - p.y }) }
+      : s))
+  }, [shapes, selectedIds, mutate])
+
   // tolerance is in field units (ColorPanel converts from its pixel slider).
   const simplifySelected = useCallback((tolerance: number) => {
     if (!selectedIds.size || tolerance <= 0) return
@@ -295,8 +336,21 @@ export default function App() {
       if (e.key === 'Escape') { setSelectedIds(new Set()); return }
       if (e.key === 'v' && !meta) { setTool('select'); return }
       if (e.key === 'l' && !meta) { setTool('line'); return }
+      if (e.key === 'r' && !meta) { setTool('rect'); return }
+      if (e.key === 'g' && !meta) { setTool('poly'); return }
+      if (e.key === 'c' && !meta) { setTool('circle'); return }
       if (e.key === 't' && !meta) { setTool('text'); return }
       if (e.key === 'p' && !meta) { setPreview(p => !p); return }
+      if (e.key === 'd' && meta) { e.preventDefault(); duplicateSelected(); return }
+      if (e.key.startsWith('Arrow') && !meta && selectedIds.size) {
+        e.preventDefault()
+        const step = (e.shiftKey ? 8 : 1) / 2048
+        if (e.key === 'ArrowLeft') nudgeSelected(-step, 0)
+        else if (e.key === 'ArrowRight') nudgeSelected(step, 0)
+        else if (e.key === 'ArrowUp') nudgeSelected(0, step)     // NAPLPS Y is up
+        else if (e.key === 'ArrowDown') nudgeSelected(0, -step)
+        return
+      }
       if (e.key === 'm' && meta) { e.preventDefault(); mergeSelected(); return }
       if (e.key === '=' && meta) { e.preventDefault(); canvasHandle.current?.zoomIn(); return }
       if (e.key === '-' && meta) { e.preventDefault(); canvasHandle.current?.zoomOut(); return }
@@ -304,7 +358,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [deleteSelected, undo, redo, mergeSelected, shapes])
+  }, [deleteSelected, undo, redo, mergeSelected, shapes, duplicateSelected, nudgeSelected, selectedIds])
 
   // Menu IPC actions
   useEffect(() => {
@@ -372,11 +426,29 @@ export default function App() {
           >╱</button>
           <button
             className="icon-btn"
+            title="Rectangle tool (R) — drag to draw a filled rect"
+            onClick={() => setTool('rect')}
+            style={tool === 'rect' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >▭</button>
+          <button
+            className="icon-btn"
+            title="Polygon tool (G) — click to add vertices, Enter/double-click to finish, Esc to cancel"
+            onClick={() => setTool('poly')}
+            style={tool === 'poly' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >⬠</button>
+          <button
+            className="icon-btn"
+            title="Circle tool (C) — drag from centre"
+            onClick={() => setTool('circle')}
+            style={tool === 'circle' ? { background: 'var(--accent)', color: '#fff' } : undefined}
+          >◯</button>
+          <button
+            className="icon-btn"
             title="Text tool (T) — click to place a NAPLPS font-text block. The viewer supplies the letterforms."
             onClick={() => setTool('text')}
             style={tool === 'text' ? { background: 'var(--accent)', color: '#fff' } : undefined}
           >T</button>
-          {(tool === 'line' || tool === 'text') && (
+          {tool !== 'select' && (
             <input
               type="color"
               value={drawColor}
@@ -385,12 +457,20 @@ export default function App() {
               style={{ width: 26, height: 24, padding: 1, alignSelf: 'center' }}
             />
           )}
+          <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
           <button
             className="icon-btn"
             title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
-            onClick={() => setPreview(p => !p)}
+            onClick={() => { setPreview(p => !p); setPlaying(false) }}
             style={preview ? { background: 'var(--accent)', color: '#fff' } : undefined}
-          >▶</button>
+          >👁</button>
+          <button
+            className="icon-btn"
+            title="Baud playback — draw the file at ~13k baud, the way a period modem session painted it"
+            onClick={() => { setPlaying(p => !p); if (!playing) setPreview(false) }}
+            style={playing ? { background: 'var(--accent)', color: '#fff' } : undefined}
+            disabled={!shapes.length && !texts.length}
+          >⏵</button>
           <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
           <button className="icon-btn" title="Zoom In (⌘=)" onClick={() => canvasHandle.current?.zoomIn()}>+</button>
           <button className="icon-btn" title="Zoom Out (⌘-)" onClick={() => canvasHandle.current?.zoomOut()}>−</button>
@@ -431,6 +511,8 @@ export default function App() {
               handle={canvasHandle}
               tool={tool}
               preview={preview}
+              playing={playing}
+              onStopPlaying={() => setPlaying(false)}
               drawColor={drawColor}
               onAddShape={addShape}
               onEditPoints={editShapePoints}
@@ -451,6 +533,8 @@ export default function App() {
               onSimplify={simplifySelected}
               onConvertToLines={convertSelectedToLines}
               onReorder={reorderSelected}
+              onFlip={flipSelected}
+              onDuplicate={duplicateSelected}
               texts={texts}
               selectedText={selectedText}
               onSelectText={setSelectedText}
