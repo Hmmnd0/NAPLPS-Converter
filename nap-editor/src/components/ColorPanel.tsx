@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { dpSimplify } from '@lib/regionTrace'
+import { NAPLPS_MAX_PALETTE, snapToVgaHex } from '@lib/turshowSim'
 import type { NapShape } from '@lib/naplps-std-decoder'
 import type { NapText } from '@lib/naplps-std-encoder'
 
@@ -170,7 +171,8 @@ export default function ColorPanel({
             <input
               type="color"
               value={recolorHex}
-              onChange={e => setRecolorHex(e.target.value)}
+              onChange={e => setRecolorHex(snapToVgaHex(e.target.value))}
+              title="Snapped to the VGA 6-bit-per-channel gamut"
               style={{ width: 32, height: 28, padding: 2 }}
             />
             <button
@@ -271,7 +273,7 @@ export default function ColorPanel({
                     type="color"
                     value={hx(t.color)}
                     onChange={e => {
-                      const m = hexToRgb(e.target.value)
+                      const m = hexToRgb(snapToVgaHex(e.target.value))
                       if (m) onUpdateText(selectedText, { color: m })
                     }}
                     style={{ width: 24, height: 20, padding: 1 }}
@@ -302,7 +304,12 @@ export default function ColorPanel({
               textTransform: 'capitalize',
             }}
           >
-            {t === 'colors' ? `Colors (${palette.length})` : `Shapes (${shapes.length})`}
+            {t === 'colors'
+              ? <span style={palette.length > NAPLPS_MAX_PALETTE ? { color: '#e05555' } : undefined}
+                  title={palette.length > NAPLPS_MAX_PALETTE ? 'Over the 16-slot NAPLPS palette: nearest colours will merge on save' : undefined}>
+                  {`Colors (${palette.length}/${NAPLPS_MAX_PALETTE})`}
+                </span>
+              : `Shapes (${shapes.length})`}
           </button>
         ))}
       </div>

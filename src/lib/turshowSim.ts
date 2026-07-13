@@ -21,6 +21,23 @@ export interface SimFrame {
 export const SIM_W = 640;
 export const SIM_H = 480;
 
+// Period display gamut: the VGA DAC is 6 bits per channel (18-bit colour,
+// 262,144 shades), and a NAPLPS file addresses at most 16 simultaneous
+// palette slots. Snap any UI-picked colour to the nearest displayable one so
+// what the user picks is what the wire (and the DAC) can actually carry.
+export const NAPLPS_MAX_PALETTE = 16;
+export function snapToVgaColor(c: NapColor): NapColor {
+  const q = (v: number) => Math.round((Math.round((v / 255) * 63) * 255) / 63);
+  return { r: q(c.r), g: q(c.g), b: q(c.b) };
+}
+export function snapToVgaHex(hex: string): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const c = snapToVgaColor({ r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) });
+  const h = (v: number) => v.toString(16).padStart(2, '0');
+  return `#${h(c.r)}${h(c.g)}${h(c.b)}`;
+}
+
 export function renderTurshowSim(shapes: NapShape[]): SimFrame {
   const W = SIM_W, H = SIM_H;
   const pixels = new Uint8ClampedArray(W * H * 4);

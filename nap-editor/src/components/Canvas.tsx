@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
-import { renderTurshowSim, SIM_W, SIM_H } from '@lib/turshowSim'
+import { renderTurshowSim, SIM_W, SIM_H, snapToVgaColor } from '@lib/turshowSim'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard } from '@lib/naplps-std-encoder'
 import type { NapShape, NapPoint } from '@lib/naplps-std-decoder'
@@ -511,9 +511,9 @@ export default function Canvas({
 
   const parseDrawColor = useCallback(() => {
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(drawColor)
-    return m
+    return snapToVgaColor(m
       ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
-      : { r: 255, g: 255, b: 255 }
+      : { r: 255, g: 255, b: 255 })
   }, [drawColor])
 
   const commitDraft = useCallback(() => {

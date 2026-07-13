@@ -4,7 +4,7 @@ import ColorPanel from './components/ColorPanel'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard, type NapText } from '@lib/naplps-std-encoder'
 import { dpSimplify } from '@lib/regionTrace'
-import { lintShapes, splitPolygonForHardware, mergeShapesForHardware } from '@lib/turshowSim'
+import { lintShapes, splitPolygonForHardware, mergeShapesForHardware, snapToVgaHex, snapToVgaColor } from '@lib/turshowSim'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
 export type Tool = 'select' | 'line' | 'rect' | 'poly' | 'circle' | 'text'
@@ -131,7 +131,8 @@ export default function App() {
 
   const recolorSelected = useCallback((r: number, g: number, b: number) => {
     if (!selectedIds.size) return
-    mutate(shapes.map((s, i) => selectedIds.has(i) ? { ...s, color: { r, g, b } } : s))
+    const c = snapToVgaColor({ r, g, b })
+    mutate(shapes.map((s, i) => selectedIds.has(i) ? { ...s, color: c } : s))
   }, [shapes, selectedIds, mutate])
 
   const addShape = useCallback((shape: NapShape) => {
@@ -439,8 +440,8 @@ export default function App() {
               <input
                 type="color"
                 value={drawColor}
-                onChange={e => setDrawColor(e.target.value)}
-                title="Draw colour"
+                onChange={e => setDrawColor(snapToVgaHex(e.target.value))}
+                title="Draw colour (snapped to the VGA 6-bit-per-channel gamut; files carry at most 16 palette slots)"
                 style={{ width: 28, height: 26, padding: 1, marginTop: 4 }}
               />
               <div style={{ flex: 1 }} />
