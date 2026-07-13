@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { dpSimplify } from '@lib/regionTrace'
-import { NAPLPS_MAX_PALETTE, snapToVgaHex } from '@lib/turshowSim'
+import { NAPLPS_MAX_PALETTE } from '@lib/turshowSim'
+import NapColorPicker from './NapColorPicker'
 import type { NapShape } from '@lib/naplps-std-decoder'
 import type { NapText } from '@lib/naplps-std-encoder'
 
@@ -168,12 +169,12 @@ export default function ColorPanel({
             Recolor selected
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input
-              type="color"
+            <NapColorPicker
               value={recolorHex}
-              onChange={e => setRecolorHex(snapToVgaHex(e.target.value))}
-              title="Snapped to the VGA 6-bit-per-channel gamut"
-              style={{ width: 32, height: 28, padding: 2 }}
+              onChange={setRecolorHex}
+              docPalette={palette.map(e2 => hexColor(e2.color))}
+              side="left"
+              size={32}
             />
             <button
               className="primary"
@@ -269,14 +270,15 @@ export default function ColorPanel({
                     onChange={e => onUpdateText(selectedText, { charH: Number(e.target.value) })}
                     style={{ flex: 1 }}
                   />
-                  <input
-                    type="color"
+                  <NapColorPicker
                     value={hx(t.color)}
-                    onChange={e => {
-                      const m = hexToRgb(snapToVgaHex(e.target.value))
+                    onChange={h => {
+                      const m = hexToRgb(h)
                       if (m) onUpdateText(selectedText, { color: m })
                     }}
-                    style={{ width: 24, height: 20, padding: 1 }}
+                    docPalette={palette.map(e2 => hexColor(e2.color))}
+                    side="left"
+                    size={24}
                   />
                   <button className="danger" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => onDeleteText(selectedText)}>✕</button>
                 </div>

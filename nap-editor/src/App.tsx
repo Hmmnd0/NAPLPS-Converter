@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Canvas, { type CanvasHandle } from './components/Canvas'
 import ColorPanel from './components/ColorPanel'
+import NapColorPicker from './components/NapColorPicker'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard, type NapText } from '@lib/naplps-std-encoder'
 import { dpSimplify } from '@lib/regionTrace'
-import { lintShapes, splitPolygonForHardware, mergeShapesForHardware, snapToVgaHex, snapToVgaColor } from '@lib/turshowSim'
+import { lintShapes, splitPolygonForHardware, mergeShapesForHardware, snapToVgaColor } from '@lib/turshowSim'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
 export type Tool = 'select' | 'line' | 'rect' | 'poly' | 'circle' | 'text'
@@ -154,6 +155,16 @@ export default function App() {
   const napSize = useMemo(() => {
     if (!shapes.length && !texts.length) return 0
     try { return encodeNaplpsStandard(shapes, { texts }).bytes.length } catch { return 0 }
+  }, [shapes, texts])
+
+  // Document palette as hex strings, for the swatch picker.
+  const docPaletteHex = useMemo(() => {
+    const seen = new Set<string>()
+    const hx = (c: { r: number; g: number; b: number }) =>
+      `#${[c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('')}`
+    for (const s of shapes) seen.add(hx(s.color))
+    for (const t of texts) if (t.color) seen.add(hx(t.color))
+    return [...seen]
   }, [shapes, texts])
 
   // ── vertex + text editing ────────────────────────────────────────────────
@@ -437,13 +448,15 @@ export default function App() {
                   }}
                 >{icon}</button>
               ))}
-              <input
-                type="color"
-                value={drawColor}
-                onChange={e => setDrawColor(snapToVgaHex(e.target.value))}
-                title="Draw colour (snapped to the VGA 6-bit-per-channel gamut; files carry at most 16 palette slots)"
-                style={{ width: 28, height: 26, padding: 1, marginTop: 4 }}
-              />
+              <div style={{ marginTop: 4 }}>
+                <NapColorPicker
+                  value={drawColor}
+                  onChange={setDrawColor}
+                  docPalette={docPaletteHex}
+                  side="right"
+                  title="Draw colour — NAPLPS/VGA colours only (16 palette slots per file)"
+                />
+              </div>
               <div style={{ flex: 1 }} />
               <button
                 className="icon-btn"
