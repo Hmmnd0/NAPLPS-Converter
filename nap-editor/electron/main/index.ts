@@ -80,6 +80,11 @@ function buildMenu(win: BrowserWindow): void {
         { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: send('zoom-out') },
         { label: 'Fit to Window', accelerator: 'CmdOrCtrl+0', click: send('fit') },
         { type: 'separator' },
+        { label: 'Show Grid', accelerator: 'CmdOrCtrl+\'', click: send('toggle-grid') },
+        { label: 'Snap to Grid', accelerator: 'CmdOrCtrl+Shift+\'', click: send('toggle-snap') },
+        { type: 'separator' },
+        { label: 'Place Image…', click: send('place-image') },
+        { type: 'separator' },
         { role: 'toggleDevTools' },
         { role: 'reload' },
       ],
@@ -123,4 +128,26 @@ ipcMain.handle('save-file-dialog', async (_, bytes: number[], defaultName: strin
   if (result.canceled || !result.filePath) return null
   await writeFile(result.filePath, Buffer.from(bytes))
   return result.filePath
+})
+
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.webp': 'image/webp',
+}
+
+ipcMain.handle('open-image', async () => {
+  const result = await dialog.showOpenDialog({
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }],
+    properties: ['openFile'],
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  const filePath = result.filePaths[0]
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  const mime = IMAGE_MIME[ext] ?? 'application/octet-stream'
+  const buf = await readFile(filePath)
+  return `data:${mime};base64,${buf.toString('base64')}`
 })

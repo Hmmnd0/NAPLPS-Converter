@@ -5,7 +5,8 @@ import NapColorPicker from './components/NapColorPicker'
 import { decodeNaplpsStandard } from '@lib/naplps-std-decoder'
 import { encodeNaplpsStandard, type NapText } from '@lib/naplps-std-encoder'
 import { dpSimplify } from '@lib/regionTrace'
-import { lintShapes, splitPolygonForHardware, mergeShapesForHardware, snapToVgaColor } from '@lib/turshowSim'
+import { lintShapes, splitPolygonForHardware, snapToVgaColor } from '@lib/turshowSim'
+import { mergeShapesExact } from './lib/mergeExact'
 import type { NapShape } from '@lib/naplps-std-decoder'
 
 export type Tool = 'select' | 'line' | 'rect' | 'poly' | 'circle' | 'text'
@@ -25,7 +26,12 @@ export default function App() {
   const [preview, setPreview] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [grid, setGrid] = useState(false)
+  const [snap, setSnap] = useState(false)
   const [drawColor, setDrawColor] = useState('#ff4040')
+  // Reference image traced beneath the artwork. Editor-only aid — never saved to the .nap file.
+  const [underlayImage, setUnderlayImage] = useState<string | null>(null)
+  const [underlayOpacity, setUnderlayOpacity] = useState(0.5)
+  const [underlayVisible, setUnderlayVisible] = useState(true)
   // NAPLPS font-text blocks (encoded as TEXT/FIELD commands on save; the
   // viewer supplies the letterforms). Authored fresh — the decoder does not
   // yet reconstruct TEXT blocks from existing files.
@@ -114,6 +120,14 @@ export default function App() {
     setDirty(false)
   }, [getBytes, fileName])
 
+  const placeImage = useCallback(async () => {
+    if (!window.api) return
+    const dataUrl = await window.api.openImage()
+    if (!dataUrl) return
+    setUnderlayImage(dataUrl)
+    setUnderlayVisible(true)
+  }, [])
+
   const deleteSelected = useCallback(() => {
     if (!selectedIds.size) return
     mutate(shapes.filter((_, i) => !selectedIds.has(i)))
@@ -122,12 +136,18 @@ export default function App() {
   const mergeSelected = useCallback(() => {
     if (selectedIds.size < 2) return
     const selected = shapes.filter((_, i) => selectedIds.has(i))
-    const color = selected[0].color
-    const pieces = mergeShapesForHardware(selected)
+    // Only filled shapes are areas to union — closing an open line/polyline
+    // into a ring and merging it as if it were solid area is what warps
+    // "line" shapes (Line tool strokes, or polygons converted via "To lines").
+    const fillable = selected.filter(s => s.filled)
+    const lines = selected.filter(s => !s.filled)
+    if (fillable.length < 2) return
+    const color = fillable[0].color
+    const pieces = mergeShapesExact(fillable)
     if (!pieces.length) return
     const merged: NapShape[] = pieces.map(points => ({ type: 'polygon', filled: true, color, points }))
     const rest = shapes.filter((_, i) => !selectedIds.has(i))
-    mutate([...rest, ...merged])
+    mutate([...rest, ...lines, ...merged])
   }, [shapes, selectedIds, mutate])
 
   const recolorSelected = useCallback((r: number, g: number, b: number) => {
@@ -309,7 +329,9 @@ export default function App() {
       if (e.key === 'c' && !meta) { setTool('circle'); return }
       if (e.key === 't' && !meta) { setTool('text'); return }
       if (e.key === 'p' && !meta) { setPreview(p => !p); return }
-      if (e.key === "'" && meta) { e.preventDefault(); setGrid(g => !g); return }
+      // e.code (not e.key) since Shift+' produces '"' on US keyboards, not "'"
+      if (e.code === 'Quote' && meta && e.shiftKey) { e.preventDefault(); setSnap(s => !s); return }
+      if (e.code === 'Quote' && meta) { e.preventDefault(); setGrid(g => !g); return }
       if (e.key === 'd' && meta) { e.preventDefault(); duplicateSelected(); return }
       if (e.key.startsWith('Arrow') && !meta && selectedIds.size) {
         e.preventDefault()
@@ -346,10 +368,13 @@ export default function App() {
         case 'zoom-in': canvasHandle.current?.zoomIn(); break
         case 'zoom-out': canvasHandle.current?.zoomOut(); break
         case 'fit': canvasHandle.current?.fitToWindow(); break
+        case 'toggle-grid': setGrid(g => !g); break
+        case 'toggle-snap': setSnap(s => !s); break
+        case 'place-image': placeImage(); break
       }
     })
     return unsub
-  }, [openFile, saveFile, saveFileAs, undo, redo, deleteSelected, mergeSelected, shapes])
+  }, [openFile, saveFile, saveFileAs, undo, redo, deleteSelected, mergeSelected, shapes, placeImage])
 
   const title = `${dirty ? '● ' : ''}${fileName} — NAP Editor`
 
@@ -369,6 +394,25 @@ export default function App() {
         WebkitAppRegion: 'drag' as React.CSSProperties['WebkitAppRegion'],
       }}>
         <span style={{ fontSize: 13, color: 'var(--text)', flex: 1, textAlign: 'center' }}>{title}</span>
+        {underlayImage && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, WebkitAppRegion: 'no-drag' as React.CSSProperties['WebkitAppRegion'] }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Image</span>
+            <input
+              type="range"
+              min={0} max={1} step={0.05}
+              value={underlayOpacity}
+              onChange={e => setUnderlayOpacity(Number(e.target.value))}
+              title="Reference image opacity"
+              style={{ width: 80 }}
+            />
+            <button
+              className="icon-btn"
+              title="Remove reference image"
+              onClick={() => setUnderlayImage(null)}
+              style={{ width: 24, height: 24, fontSize: 12 }}
+            >✕</button>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 4, WebkitAppRegion: 'no-drag' as React.CSSProperties['WebkitAppRegion'] }}>
           <button className="icon-btn" title="Open (⌘O)" onClick={openFile}>⌘O</button>
           <button
@@ -460,10 +504,30 @@ export default function App() {
               <div style={{ flex: 1 }} />
               <button
                 className="icon-btn"
-                title="Grid (⌘') — 1/128-field grid; drawing tools snap to it"
+                title="Show Grid (⌘') — 1/128-field grid overlay"
                 onClick={() => setGrid(g => !g)}
                 style={{ width: 32, height: 32, ...(grid ? { background: 'var(--accent)', color: '#fff' } : {}) }}
               >⌗</button>
+              <button
+                className="icon-btn"
+                title="Snap to Grid (⌘⇧') — drawing tools snap to the field grid; moving shapes snaps to the nearest VGA pixel"
+                onClick={() => setSnap(s => !s)}
+                style={{ width: 32, height: 32, ...(snap ? { background: 'var(--accent)', color: '#fff' } : {}) }}
+              >🧲</button>
+              <button
+                className="icon-btn"
+                title="Place reference image… — traced beneath the artwork, not saved to the .nap file"
+                onClick={placeImage}
+                style={{ width: 32, height: 32 }}
+              >🖼</button>
+              {underlayImage && (
+                <button
+                  className="icon-btn"
+                  title={underlayVisible ? 'Hide reference image' : 'Show reference image'}
+                  onClick={() => setUnderlayVisible(v => !v)}
+                  style={{ width: 32, height: 32, ...(underlayVisible ? { background: 'var(--accent)', color: '#fff' } : {}) }}
+                >◐</button>
+              )}
               <button
                 className="icon-btn"
                 title="TURSHOW preview (P) — pixel-faithful render of what the period viewer draws"
@@ -488,6 +552,10 @@ export default function App() {
               preview={preview}
               playing={playing}
               grid={grid}
+              snap={snap}
+              underlayImage={underlayImage}
+              underlayOpacity={underlayOpacity}
+              underlayVisible={underlayVisible}
               onStopPlaying={() => setPlaying(false)}
               drawColor={drawColor}
               onAddShape={addShape}

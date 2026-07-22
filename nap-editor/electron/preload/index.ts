@@ -9,6 +9,7 @@ export interface NapAPI {
   openFile: () => Promise<FileResult | null>
   saveFile: (bytes: number[], filePath: string) => Promise<string>
   saveFileDialog: (bytes: number[], defaultName: string) => Promise<string | null>
+  openImage: () => Promise<string | null>
   onMenuAction: (cb: (action: string) => void) => () => void
 }
 
@@ -20,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
 
   saveFileDialog: (bytes: number[], defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke('save-file-dialog', bytes, defaultName),
+
+  openImage: (): Promise<string | null> => ipcRenderer.invoke('open-image'),
 
   onMenuAction: (cb: (action: string) => void): (() => void) => {
     const handler = (_: unknown, action: string): void => cb(action)

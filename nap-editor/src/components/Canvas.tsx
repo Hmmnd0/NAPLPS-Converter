@@ -72,8 +72,10 @@ interface Props {
   /** baud-paced playback of the encoded byte stream */
   playing?: boolean
   onStopPlaying?: () => void
-  /** show a field-space grid; drawing-tool clicks snap to it */
+  /** show a field-space grid */
   grid?: boolean
+  /** drawing-tool clicks and drags snap to the field grid, independent of grid visibility */
+  snap?: boolean
   /** hex colour for the line/text tools */
   drawColor?: string
   onAddShape?: (shape: NapShape) => void
@@ -83,13 +85,18 @@ interface Props {
   onSelectText?: (i: number | null) => void
   onAddText?: (t: NapText) => void
   onUpdateText?: (i: number, patch: Partial<NapText>) => void
+  /** reference image traced beneath the artwork; not part of the saved .nap file */
+  underlayImage?: string | null
+  underlayOpacity?: number
+  underlayVisible?: boolean
 }
 
 export default function Canvas({
   shapes, selectedIds, onSelect, onMove, handle,
-  tool = 'select', preview = false, playing = false, onStopPlaying, grid = false,
+  tool = 'select', preview = false, playing = false, onStopPlaying, grid = false, snap = false,
   drawColor = '#ffffff', onAddShape,
   onEditPoints, texts = [], selectedText = null, onSelectText, onAddText, onUpdateText,
+  underlayImage = null, underlayOpacity = 0.5, underlayVisible = true,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [tf, setTf] = useState<Transform>({ zoom: 1, panX: 0, panY: 0 })
@@ -198,15 +205,26 @@ export default function Canvas({
 
   // Grid: 1/128 field steps (≈5 VGA px), major line every 8 minors.
   const GRID_STEP = 1 / 128
-  const gridRef = useRef(grid)
-  useEffect(() => { gridRef.current = grid }, [grid])
+  // One VGA pixel: field x∈[0,1]/640px and y∈[0,0.75]/480px both work out to 1/640.
+  const PIXEL_STEP = 1 / 640
+  const snapRef = useRef(snap)
+  useEffect(() => { snapRef.current = snap }, [snap])
   const snapField = useCallback((p: NapPoint): NapPoint => {
-    if (!gridRef.current) return p
+    if (!snapRef.current) return p
     return {
       x: Math.round(p.x / GRID_STEP) * GRID_STEP,
       y: Math.round(p.y / GRID_STEP) * GRID_STEP,
     }
   }, [GRID_STEP])
+  // Moving existing shapes snaps to whole VGA pixels (finer than the field
+  // grid above) so drags don't drift off the pixel grid the art was traced on.
+  const snapMoveDelta = useCallback((dx: number, dy: number): { dx: number; dy: number } => {
+    if (!snapRef.current) return { dx, dy }
+    return {
+      dx: Math.round(dx / PIXEL_STEP) * PIXEL_STEP,
+      dy: Math.round(dy / PIXEL_STEP) * PIXEL_STEP,
+    }
+  }, [PIXEL_STEP])
 
   // Window-level mouse tracking during drag/pan so the cursor can leave the SVG
   useEffect(() => {
@@ -232,8 +250,8 @@ export default function Canvas({
         if (!ds.moved && Math.hypot(screenDx, screenDy) < DRAG_THRESHOLD) return
         ds.moved = true
         // Convert screen delta → NAPLPS delta (Y is flipped: down screen = down Y NAPLPS)
-        const napDx = screenDx / zoom / NW
-        const napDy = -screenDy / zoom / NW
+        const raw = { dx: screenDx / zoom / NW, dy: -screenDy / zoom / NW }
+        const { dx: napDx, dy: napDy } = snapMoveDelta(raw.dx, raw.dy)
         setDragOffset({ dx: napDx, dy: napDy })
         return
       }
@@ -284,8 +302,7 @@ export default function Canvas({
           // Commit the move
           const screenDx = e.clientX - ds.startMx
           const screenDy = e.clientY - ds.startMy
-          const napDx = screenDx / zoom / NW
-          const napDy = -screenDy / zoom / NW
+          const { dx: napDx, dy: napDy } = snapMoveDelta(screenDx / zoom / NW, -screenDy / zoom / NW)
           const sel = selectedRef.current
           const moved = ds.originalShapes.map((s, i) =>
             sel.has(i)
@@ -382,7 +399,7 @@ export default function Canvas({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [rubber, onAddShape, drawColor, onEditPoints, onUpdateText, snapField]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
+  }, [rubber, onAddShape, drawColor, onEditPoints, onUpdateText, snapField, snapMoveDelta]) // rubber in dep so onUp closure sees latest rubber for the rubber-band case
 
   // ── Baud playback ──────────────────────────────────────────────────────────
   // Encode once on start; advance the byte position in real time; render the
@@ -461,7 +478,7 @@ export default function Canvas({
     }
   }, [preview, shapes, texts])
 
-  // screen coords → NAPLPS field coords (snapped when the grid is on)
+  // screen coords → NAPLPS field coords (snapped when snap-to-grid is on)
   const screenToField = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current
     if (!el) return null
@@ -687,6 +704,17 @@ export default function Canvas({
         <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
           {!preview && !playing && <rect x={0} y={0} width={NW} height={NH} fill="#000" />}
 
+          {/* reference image, traced beneath the artwork; locked, never saved */}
+          {underlayImage && underlayVisible && !preview && !playing && (
+            <image
+              href={underlayImage}
+              x={0} y={0} width={NW} height={NH}
+              opacity={underlayOpacity}
+              preserveAspectRatio="xMidYMid meet"
+              pointerEvents="none"
+            />
+          )}
+
           {/* field grid: minor 1/128 field, major every 8 minors */}
           {grid && !preview && !playing && (() => {
             const minor = NW / 128
@@ -786,7 +814,7 @@ export default function Canvas({
                   width={maxLen * charW} height={t.lines.length * fontSize}
                   fill="transparent"
                   stroke={sel ? '#0a84ff' : 'none'}
-                  strokeWidth={1.5 / zoom}
+                  strokeWidth={2 / zoom}
                   strokeDasharray={sel ? `${4 / zoom} ${3 / zoom}` : undefined}
                 />
                 {t.lines.map((line, k) => (

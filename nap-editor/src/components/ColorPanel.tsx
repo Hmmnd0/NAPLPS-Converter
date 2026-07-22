@@ -101,11 +101,12 @@ export default function ColorPanel({
   return (
     <div style={{
       width: 220,
+      flexShrink: 0,
       background: 'var(--surface)',
       borderLeft: '1px solid var(--border)',
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden',
+      overflow: 'visible',
     }}>
 
       {/* Selection summary */}
@@ -261,15 +262,17 @@ export default function ColorPanel({
                     type="range" min={0.008} max={0.04} step={0.0005}
                     value={t.charW ?? 0.0145}
                     onChange={e => onUpdateText(selectedText, { charW: Number(e.target.value) })}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
                   H
                   <input
                     type="range" min={0.014} max={0.07} step={0.001}
                     value={t.charH ?? 0.028}
                     onChange={e => onUpdateText(selectedText, { charH: Number(e.target.value) })}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <NapColorPicker
                     value={hx(t.color)}
                     onChange={h => {
@@ -280,7 +283,8 @@ export default function ColorPanel({
                     side="left"
                     size={24}
                   />
-                  <button className="danger" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => onDeleteText(selectedText)}>✕</button>
+                  <div style={{ flex: 1 }} />
+                  <button className="danger" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => onDeleteText(selectedText)}>✕ Delete text</button>
                 </div>
               </div>
             )
