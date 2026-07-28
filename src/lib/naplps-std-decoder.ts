@@ -74,6 +74,19 @@ const COORD_OPS = new Set([
 // 0..8192 scaled to 0..255). Slots 0-7 are a black→white grayscale ramp, 8-15
 // the colours. Files that rely on defaults (e.g. EAGLE1) need this; files that
 // define their own palette via SET-COLOR (e.g. SANTA) override it.
+//
+// The entries are ANSI X3.110 Figure 25's N=4, M=9 table, and the 3-bit → 8-bit
+// expansion follows the spec's own arithmetic: it normalises a primary by "7/8
+// (the maximum binary fraction expressible in three bits)", so 111 is 223, not
+// 255 — hence Figure 25 calling the top grey entry NOMINAL white.
+//
+// Slot 7 is the one place RHINO departs from that: 255 rather than the 224 the
+// fraction scale gives (8192 rather than 7168 raw), i.e. nominal white forced to
+// true white while the hues stay on the fraction scale. Kept as shipped — this
+// table is what the period renderer actually drew, and EAGLE1 was checked
+// against it. The FoxCouncil/NAPLPS .NET decoder expands full-range instead
+// (v*255/7, so 111 → 255), which is up to 32/255 brighter per channel; see that
+// repo's docs/gaps.md.
 const DEFAULT_PALETTE: NapColor[] = [
   { r: 0, g: 0, b: 0 }, { r: 32, g: 32, b: 32 }, { r: 64, g: 64, b: 64 }, { r: 96, g: 96, b: 96 },
   { r: 128, g: 128, b: 128 }, { r: 159, g: 159, b: 159 }, { r: 191, g: 191, b: 191 }, { r: 255, g: 255, b: 255 },
